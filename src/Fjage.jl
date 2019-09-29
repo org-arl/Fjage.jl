@@ -1,7 +1,9 @@
 """
 Julia-fjåge Gateway.
 
-Note: This implementation is not thread-safe.
+Notes:
+- This implementation is not thread-safe.
+- Gateway does not automatically reconnect if connection to server is lost.
 
 # Examples
 
