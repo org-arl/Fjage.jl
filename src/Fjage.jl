@@ -270,7 +270,7 @@ function _messageclass(clazz::String, performative)
       end
       return $(esc(sname))($(string(clazz)), dict)
     end
-    messageclasses[$(esc(clazz))] = $(esc(sname))
+    Fjage.messageclasses[$(esc(clazz))] = $(esc(sname))
   end
 end
 
