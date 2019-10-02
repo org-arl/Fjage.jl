@@ -4,6 +4,7 @@ Julia-fjåge Gateway.
 Notes:
 - This implementation is not thread-safe.
 - Gateway does not automatically reconnect if connection to server is lost.
+- Message subclassing not yet supported.
 
 # Examples
 
@@ -11,7 +12,7 @@ Assuming fjåge master container is running on `localhost` at port 1100:
 
 ```julia-repl
 julia> using Fjage
-julia> ShellExecReq = MessageClass("org.arl.fjage.shell.ShellExecReq");
+julia> ShellExecReq = @MessageClass("org.arl.fjage.shell.ShellExecReq");
 julia> gw = Gateway("localhost", 1100);
 julia> shell = agentforservice(gw, "org.arl.fjage.shell.Services.SHELL")
 shell
@@ -33,11 +34,14 @@ module Fjage
 using Sockets, Distributed, Base64, UUIDs, Dates, JSON
 
 # exported symbols
-export Performative, AgentID, Gateway, Message, GenericMessage, MessageClass
+export Performative, AgentID, Gateway, Message, GenericMessage, @MessageClass
 export agent, topic, send, receive, request, agentforservice, agentsforservice, subscribe, unsubscribe
 
 # package settings
 const MAX_QUEUE_LEN = 256
+
+# global variables
+messageclasses = Dict{String,DataType}()
 
 "An action represented by a message."
 module Performative
@@ -244,8 +248,11 @@ function close(gw::Gateway)
   Base.close(gw.sock)
 end
 
-# create a Message subclass from a qualified classname
-macro _define_message(sname::Symbol, clazz, perf)
+function _messageclass(clazz::String, performative)
+  if haskey(messageclasses, clazz)
+    return messageclasses[clazz]
+  end
+  sname = Symbol(replace(string(clazz), "." => "_"))
   quote
     struct $(esc(sname)) <: Message
       clazz::String
@@ -254,18 +261,29 @@ macro _define_message(sname::Symbol, clazz, perf)
     function $(esc(sname))(; kwargs...)
       dict = Dict{String,Any}(
         "msgID" => string(uuid4()),
-        "perf" => string($perf)
+        "perf" => $(esc(string(
+          performative!=nothing ? performative : match(r"Req$",string(clazz))==nothing ? Performative.INFORM : Performative.REQUEST
+        )))
       )
       for k in keys(kwargs)
         dict[string(k)] = kwargs[k]
       end
-      return $(esc(sname))(string($clazz), dict)
+      return $(esc(sname))($(string(clazz)), dict)
     end
+    messageclasses[$(esc(clazz))] = $(esc(sname))
   end
 end
 
+function _messageclass_lookup(clazz::String)
+  if haskey(messageclasses, clazz)
+    return messageclasses[clazz]
+  end
+  return Message
+end
+
+
 """
-    mtype = MessageClass(clazz[, perf])
+    mtype = @MessageClass(clazz[, performative])
 
 Create a message class from a fully qualified class name. If a performative is not
 specified, it is guessed based on the class name. For class names ending with "Req",
@@ -275,21 +293,13 @@ the performative is assumed to be REQUEST, and for all other messages, INFORM.
 
 ```julia-repl
 julia> using Fjage
-julia> ShellExecReq = MessageClass("org.arl.fjage.shell.ShellExecReq");
+julia> ShellExecReq = @MessageClass("org.arl.fjage.shell.ShellExecReq");
 julia> req = ShellExecReq(cmd="ps")
 ShellExecReq: REQUEST [cmd:"ps"]
 ```
 """
-function MessageClass(clazz::String, perf=nothing)
-  if perf == nothing
-    if match(r"Req$", clazz) != nothing
-      perf = Performative.REQUEST
-    else
-      perf = Performative.INFORM
-    end
-  end
-  sname = Symbol(replace(clazz, "." => "_"))
-  return @eval @_define_message($sname, $clazz, $perf)
+macro MessageClass(clazz::String, performative=nothing)
+  return _messageclass(clazz, performative)
 end
 
 # prepares a message to be sent to the server
@@ -336,7 +346,7 @@ function _inflate(json)
   end
   clazz = json["clazz"]
   data = json["data"]
-  stype = MessageClass(clazz)
+  stype = _messageclass_lookup(clazz)
   obj = @eval $stype()
   for k in keys(data)
     v = data[k]
@@ -595,7 +605,7 @@ function Base.show(io::IO, msg::Message)
 end
 
 "Generic message type that can carry arbitrary name-value pairs as data."
-GenericMessage = MessageClass("org.arl.fjage.GenericMessage", Performative.INFORM)
+GenericMessage = @MessageClass("org.arl.fjage.GenericMessage")
 
 """
     msg = Message([perf])

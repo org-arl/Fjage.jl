@@ -48,7 +48,7 @@ try
       @test length(alist) == 0
     end
 
-    ShellExecReq = MessageClass("org.arl.fjage.shell.ShellExecReq")
+    ShellExecReq = @MessageClass("org.arl.fjage.shell.ShellExecReq")
     @testset "MessageClass" begin
       @test ShellExecReq <: Message
     end
