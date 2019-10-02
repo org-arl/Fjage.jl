@@ -256,7 +256,7 @@ function _messageclass(clazz::String, superclass, performative)
       dict = Dict{String,Any}(
         "msgID" => string(uuid4()),
         "perf" => $(esc(string(
-          performative!=nothing ? performative : match(r"Req$",string(clazz))==nothing ? Performative.INFORM : Performative.REQUEST
+          $(esc(performative))!=nothing ? $(esc(performative)) : match(r"Req$",string(clazz))==nothing ? Performative.INFORM : Performative.REQUEST
         )))
       )
       for k in keys(kwargs)
@@ -273,7 +273,7 @@ function _messageclass(clazz::String, superclass, performative)
       end
     end
     println($(esc(clazz)), " => ", $(esc(sname)))
-    messageclasses[$(esc(clazz))] = $(esc(sname))
+    Fjage.messageclasses[$(esc(clazz))] = $(esc(sname))
   end
 end
 
