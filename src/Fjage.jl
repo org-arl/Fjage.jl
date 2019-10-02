@@ -27,10 +27,6 @@ julia> close(gw)
 """
 module Fjage
 
-# install and use dependencies
-# using Pkg
-# Pkg.add("JSON")
-
 using Sockets, Distributed, Base64, UUIDs, Dates, JSON
 
 # exported symbols
@@ -42,6 +38,7 @@ const MAX_QUEUE_LEN = 256
 
 # global variables
 messageclasses = Dict{String,DataType}()
+messagechildren = Dict{DataType,Set{DataType}}()
 
 "An action represented by a message."
 module Performative
@@ -248,12 +245,9 @@ function close(gw::Gateway)
   Base.close(gw.sock)
 end
 
-function _messageclass(clazz::String, performative)
-  if haskey(messageclasses, clazz)
-    return messageclasses[clazz]
-  end
+function _messageclass(clazz::String, superclass, performative)
   sname = Symbol(replace(string(clazz), "." => "_"))
-  quote
+  return quote
     struct $(esc(sname)) <: Message
       clazz::String
       data::Dict{String,Any}
@@ -270,6 +264,15 @@ function _messageclass(clazz::String, performative)
       end
       return $(esc(sname))($(string(clazz)), dict)
     end
+    if $(esc(superclass)) != nothing
+      println($(esc(sname)), " <: ", $(esc(superclass)))
+      if haskey(messagechildren, $(esc(sname)))
+        push!(messagechildren[$(esc(superclass))], $(esc(sname)))
+      else
+        messagechildren[$(esc(superclass))] = Set{DataType}([$(esc(sname))])
+      end
+    end
+    println($(esc(clazz)), " => ", $(esc(sname)))
     Fjage.messageclasses[$(esc(clazz))] = $(esc(sname))
   end
 end
@@ -281,9 +284,8 @@ function _messageclass_lookup(clazz::String)
   return Message
 end
 
-
 """
-    mtype = @MessageClass(clazz[, performative])
+    mtype = @MessageClass(clazz[, superclass[, performative]])
 
 Create a message class from a fully qualified class name. If a performative is not
 specified, it is guessed based on the class name. For class names ending with "Req",
@@ -298,8 +300,8 @@ julia> req = ShellExecReq(cmd="ps")
 ShellExecReq: REQUEST [cmd:"ps"]
 ```
 """
-macro MessageClass(clazz::String, performative=nothing)
-  return _messageclass(clazz, performative)
+macro MessageClass(clazz::String, superclass=nothing, performative=nothing)
+  return _messageclass(clazz, superclass, performative)
 end
 
 # prepares a message to be sent to the server
