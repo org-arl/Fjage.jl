@@ -12,7 +12,7 @@ Assuming fjåge master container is running on `localhost` at port 1100:
 
 ```julia-repl
 julia> using Fjage
-julia> ShellExecReq = @MessageClass("org.arl.fjage.shell.ShellExecReq");
+julia> ShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq");
 julia> gw = Gateway("localhost", 1100);
 julia> shell = agentforservice(gw, "org.arl.fjage.shell.Services.SHELL")
 shell
@@ -30,15 +30,14 @@ module Fjage
 using Sockets, Distributed, Base64, UUIDs, Dates, JSON
 
 # exported symbols
-export Performative, AgentID, Gateway, Message, GenericMessage, @MessageClass
+export Performative, AgentID, Gateway, Message, GenericMessage, MessageClass
 export agent, topic, send, receive, request, agentforservice, agentsforservice, subscribe, unsubscribe
 
 # package settings
 const MAX_QUEUE_LEN = 256
 
 # global variables
-messageclasses = Dict{String,DataType}()
-messagechildren = Dict{DataType,Set{DataType}}()
+const _messageclasses = Dict{String,DataType}()
 
 "An action represented by a message."
 module Performative
@@ -245,47 +244,45 @@ function close(gw::Gateway)
   Base.close(gw.sock)
 end
 
-function _messageclass(clazz::String, superclass, performative)
-  sname = Symbol(replace(string(clazz), "." => "_"))
-  return quote
-    struct $(esc(sname)) <: Message
-      clazz::String
-      data::Dict{String,Any}
-    end
-    function $(esc(sname))(; kwargs...)
-      dict = Dict{String,Any}(
-        "msgID" => string(uuid4()),
-        "perf" => $(esc(string(
-          $(esc(performative))!=nothing ? $(esc(performative)) : match(r"Req$",string(clazz))==nothing ? Performative.INFORM : Performative.REQUEST
-        )))
-      )
-      for k in keys(kwargs)
-        dict[string(k)] = kwargs[k]
-      end
-      return $(esc(sname))($(string(clazz)), dict)
-    end
-    if $(esc(superclass)) != nothing
-      println($(esc(sname)), " <: ", $(esc(superclass)))
-      if haskey(messagechildren, $(esc(sname)))
-        push!(messagechildren[$(esc(superclass))], $(esc(sname)))
-      else
-        messagechildren[$(esc(superclass))] = Set{DataType}([$(esc(sname))])
-      end
-    end
-    println($(esc(clazz)), " => ", $(esc(sname)))
-    Fjage.messageclasses[$(esc(clazz))] = $(esc(sname))
+function _messageclass(clazz::String, performative)
+  sname = replace(string(clazz), "." => "_")
+  if performative == nothing
+    performative = match(r"Req$",string(clazz))==nothing ? Performative.INFORM : Performative.REQUEST
   end
+  expr = Expr(:toplevel)
+  expr.args = [Meta.parse("""
+      struct $sname <: $(@__MODULE__).Message
+        clazz::String
+        data::Dict{String,Any}
+      end
+    """),
+    Meta.parse("""
+      function $sname(; kwargs...)
+        dict = Dict{String,Any}(
+          "msgID" => string($(@__MODULE__).uuid4()),
+          "perf" => "$performative"
+        )
+        for k in keys(kwargs)
+          dict[string(k)] = kwargs[k]
+        end
+        return $sname("$clazz", dict)
+      end
+    """),
+    Meta.parse("""
+      $(@__MODULE__)._messageclasses["$clazz"] = $sname
+    """)]
+  return expr
 end
 
 function _messageclass_lookup(clazz::String)
-  if haskey(messageclasses, clazz)
-    return messageclasses[clazz]
+  if haskey(_messageclasses, clazz)
+    return _messageclasses[clazz]
   end
   return Message
 end
 
 """
-    mtype = @MessageClass(clazz[, superclass[, performative]])
+    mtype = MessageClass(context, clazz[, superclass[, performative]])
 
 Create a message class from a fully qualified class name. If a performative is not
 specified, it is guessed based on the class name. For class names ending with "Req",
@@ -295,13 +292,14 @@ the performative is assumed to be REQUEST, and for all other messages, INFORM.
 
 ```julia-repl
 julia> using Fjage
-julia> ShellExecReq = @MessageClass("org.arl.fjage.shell.ShellExecReq");
+julia> ShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq");
 julia> req = ShellExecReq(cmd="ps")
 ShellExecReq: REQUEST [cmd:"ps"]
 ```
 """
-macro MessageClass(clazz::String, superclass=nothing, performative=nothing)
-  return _messageclass(clazz, superclass, performative)
+function MessageClass(context, clazz::String, performative=nothing)
+  code = _messageclass(clazz, performative)
+  return context.eval(code)
 end
 
 # prepares a message to be sent to the server
@@ -607,7 +605,7 @@ function Base.show(io::IO, msg::Message)
 end
 
 "Generic message type that can carry arbitrary name-value pairs as data."
-GenericMessage = @MessageClass("org.arl.fjage.GenericMessage")
+GenericMessage = MessageClass(@__MODULE__, "org.arl.fjage.GenericMessage")
 
 """
     msg = Message([perf])
