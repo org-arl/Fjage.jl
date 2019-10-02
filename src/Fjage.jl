@@ -4,7 +4,6 @@ Julia-fjåge Gateway.
 Notes:
 - This implementation is not thread-safe.
 - Gateway does not automatically reconnect if connection to server is lost.
-- Message subclassing not yet supported.
 
 # Examples
 
@@ -30,7 +29,7 @@ module Fjage
 using Sockets, Distributed, Base64, UUIDs, Dates, JSON
 
 # exported symbols
-export Performative, AgentID, Gateway, Message, GenericMessage, MessageClass
+export Performative, AgentID, Gateway, Message, GenericMessage, MessageClass, AbstractMessageClass
 export agent, topic, send, receive, request, agentforservice, agentsforservice, subscribe, unsubscribe
 
 # package settings
@@ -244,43 +243,6 @@ function close(gw::Gateway)
   Base.close(gw.sock)
 end
 
-function _messageclass(clazz::String, performative)
-  sname = replace(string(clazz), "." => "_")
-  if performative == nothing
-    performative = match(r"Req$",string(clazz))==nothing ? Performative.INFORM : Performative.REQUEST
-  end
-  expr = Expr(:toplevel)
-  expr.args = [Meta.parse("""
-      struct $sname <: $(@__MODULE__).Message
-        clazz::String
-        data::Dict{String,Any}
-      end
-    """),
-    Meta.parse("""
-      function $sname(; kwargs...)
-        dict = Dict{String,Any}(
-          "msgID" => string($(@__MODULE__).uuid4()),
-          "perf" => "$performative"
-        )
-        for k in keys(kwargs)
-          dict[string(k)] = kwargs[k]
-        end
-        return $sname("$clazz", dict)
-      end
-    """),
-    Meta.parse("""
-      $(@__MODULE__)._messageclasses["$clazz"] = $sname
-    """)]
-  return expr
-end
-
-function _messageclass_lookup(clazz::String)
-  if haskey(_messageclasses, clazz)
-    return _messageclasses[clazz]
-  end
-  return Message
-end
-
 """
     mtype = MessageClass(context, clazz[, superclass[, performative]])
 
@@ -297,9 +259,66 @@ julia> req = ShellExecReq(cmd="ps")
 ShellExecReq: REQUEST [cmd:"ps"]
 ```
 """
-function MessageClass(context, clazz::String, performative=nothing)
-  code = _messageclass(clazz, performative)
-  return context.eval(code)
+function MessageClass(context, clazz::String, superclass=nothing, performative=nothing)
+  sname = replace(string(clazz), "." => "_")
+  tname = sname
+  if performative == nothing
+    performative = match(r"Req$",string(clazz))==nothing ? Performative.INFORM : Performative.REQUEST
+  end
+  if superclass == nothing
+    superclass = "$(@__MODULE__).Message"
+  else
+    scname = string(superclass)
+    ndx = findlast(isequal('.'), scname)
+    if ndx != nothing
+      scname = scname[ndx+1:end]
+    end
+    if scname == tname
+      tname = "$(scname)_"
+    end
+  end
+  expr = Expr(:toplevel)
+  expr.args = [Meta.parse("""
+      struct $(tname) <: $(superclass)
+        clazz::String
+        data::Dict{String,Any}
+      end
+    """),
+    Meta.parse("""
+      function $(sname)(; kwargs...)
+        dict = Dict{String,Any}(
+          "msgID" => string($(@__MODULE__).uuid4()),
+          "perf" => "$(performative)"
+        )
+        for k in keys(kwargs)
+          dict[string(k)] = kwargs[k]
+        end
+        return $(tname)("$(clazz)", dict)
+      end
+    """),
+    Meta.parse("""
+      $(@__MODULE__)._messageclasses["$(clazz)"] = $(tname)
+    """)]
+  if sname != tname
+    push!(expr.args, Meta.parse("$(tname)(; kwargs...) = $(sname)(; kwargs...)"))
+  end
+  return context.eval(expr)
+end
+
+function AbstractMessageClass(context, clazz::String, performative=nothing)
+  sname = replace(string(clazz), "." => "_")
+  expr = Expr(:toplevel)
+  expr.args = [Meta.parse("abstract type $sname <: $(@__MODULE__).Message end"), Meta.parse("$sname")]
+  rv = context.eval(expr)
+  MessageClass(context, clazz, rv, performative)
+  return rv
+end
+
+function _messageclass_lookup(clazz::String)
+  if haskey(_messageclasses, clazz)
+    return _messageclasses[clazz]
+  end
+  return Message
 end
 
 # prepares a message to be sent to the server

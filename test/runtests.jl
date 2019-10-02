@@ -48,12 +48,18 @@ try
       @test length(alist) == 0
     end
 
-    ShellExecReq = @MessageClass("org.arl.fjage.shell.ShellExecReq")
+    ShellExecReq = AbstractMessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq")
+    MyShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.MyShellExecReq", ShellExecReq)
     @testset "MessageClass" begin
       @test ShellExecReq <: Message
+      @test MyShellExecReq <: Message
+      @test MyShellExecReq <: ShellExecReq
+      @test isa(ShellExecReq(), ShellExecReq)
+      @test isa(MyShellExecReq(), ShellExecReq)
     end
 
     @testset "send & receive (gw)" begin
+      flush(gw)
       send(gw, ShellExecReq(recipient=shell, cmd="ps"))
       rsp = receive(gw, 1000)
       @test typeof(rsp) <: Message
@@ -61,6 +67,7 @@ try
     end
 
     @testset "send & receive (aid)" begin
+      flush(gw)
       send(shell, ShellExecReq(cmd="ps"))
       rsp = receive(gw, 1000)
       @test typeof(rsp) <: Message
@@ -68,18 +75,21 @@ try
     end
 
     @testset "request (gw)" begin
+      flush(gw)
       rsp = request(gw, ShellExecReq(recipient=shell, cmd="ps"))
       @test typeof(rsp) <: Message
       @test rsp.performative == "AGREE"
     end
 
     @testset "request (aid)" begin
+      flush(gw)
       rsp = request(shell, ShellExecReq(cmd="ps"))
       @test typeof(rsp) <: Message
       @test rsp.performative == "AGREE"
     end
 
     @testset "<< (aid, +)" begin
+      flush(gw)
       rsp = shell << ShellExecReq(cmd="ps")
       @test typeof(rsp) <: Message
       @test rsp.performative == "AGREE"
@@ -96,6 +106,7 @@ try
     end
 
     @testset "flush" begin
+      flush(gw)
       send(gw, ShellExecReq(recipient=shell, cmd="ps"))
       sleep(1)
       flush(gw)
@@ -109,19 +120,37 @@ try
     end
 
     @testset "subscribe (-)" begin
+      flush(gw)
       send(ntf, ShellExecReq(cmd="ps"))
       msg = receive(gw, 1000)
       @test msg == nothing
     end
 
     @testset "subscribe (+)" begin
+      flush(gw)
       subscribe(gw, ntf)
       send(ntf, ShellExecReq(cmd="ps"))
       msg = receive(gw, 1000)
       @test typeof(msg) <: ShellExecReq
     end
 
+    @testset "receive (filt, +)" begin
+      flush(gw)
+      send(ntf, ShellExecReq(cmd="ps"))
+      msg = receive(gw, ShellExecReq, 1000)
+      @test typeof(msg) <: ShellExecReq
+    end
+
+    UnknownReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.UnknownReq")
+    @testset "receive (filt, -)" begin
+      flush(gw)
+      send(ntf, ShellExecReq(cmd="ps"))
+      msg = receive(gw, UnknownReq, 1000)
+      @test msg == nothing
+    end
+
     @testset "unsubscribe" begin
+      flush(gw)
       unsubscribe(gw, ntf)
       send(ntf, ShellExecReq(cmd="ps"))
       msg = receive(gw, 1000)
