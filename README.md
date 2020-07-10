@@ -18,10 +18,11 @@ pkg> add https://github.com/org-arl/Fjage.jl
 In Julia REPL:
 ```julia
 julia> using Fjage
-julia> ShellExecReq = MessageClass("org.arl.fjage.shell.ShellExecReq");
 julia> gw = Gateway("localhost", 1100);
 julia> shell = agentforservice(gw, "org.arl.fjage.shell.Services.SHELL")
 shell
+julia> shell.language
+"Groovy"
 julia> request(gw, ShellExecReq(recipient=shell, cmd="ps"))
 AGREE
 julia> request(shell, ShellExecReq(cmd="ps"))
@@ -31,4 +32,4 @@ AGREE
 julia> close(gw)
 ```
 
-For more details, see help (press "?" in Julia REPL) for `Fjage`.
+For more details, see help (press "?" in Julia REPL) for `Fjage`, and the [fjåge gateway API specifications](https://github.com/org-arl/fjage/blob/master/gateways/Gateways.md).
