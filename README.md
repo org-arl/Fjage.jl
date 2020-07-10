@@ -1,7 +1,7 @@
-![](https://github.com/org-arl/Fjage.jl/workflows/CI/badge.svg)
+![](https://github.com/org-arl/Fjage.jl/workflows/CI/badge.svg)<br>
+_fjåge v1.7.0_
 
 # Fjåge Julia gateway
-_(beta version)_
 
 Julia gateway that can connect to the [fjåge](https://github.com/org-arl/fjage) agent framework.
 
