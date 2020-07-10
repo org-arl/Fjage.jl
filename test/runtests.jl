@@ -48,14 +48,14 @@ try
       @test length(alist) == 0
     end
 
-    ShellExecReq = AbstractMessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq")
-    MyShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.MyShellExecReq", ShellExecReq)
+    MyAbstractReq = AbstractMessageClass(@__MODULE__, "org.arl.fjage.test.MyAbstractReq")
+    MyReq = MessageClass(@__MODULE__, "org.arl.fjage.test.MyReq", MyAbstractReq)
     @testset "MessageClass" begin
-      @test ShellExecReq <: Message
-      @test MyShellExecReq <: Message
-      @test MyShellExecReq <: ShellExecReq
-      @test isa(ShellExecReq(), ShellExecReq)
-      @test isa(MyShellExecReq(), ShellExecReq)
+      @test MyAbstractReq <: Message
+      @test MyReq <: Message
+      @test MyReq <: MyAbstractReq
+      @test isa(MyAbstractReq(), MyAbstractReq)
+      @test isa(MyReq(), MyAbstractReq)
     end
 
     @testset "send & receive (gw)" begin
@@ -157,6 +157,52 @@ try
       @test msg == nothing
     end
 
+    code = "
+      container.add 'a', new org.arl.fjage.Agent() {
+        int x = 1
+        int y = 2
+        String s = 'hello'
+        double[] f = [1.0, 2.0]
+        void init() {
+          add new org.arl.fjage.param.ParameterMessageBehavior()
+        }
+        int getZ(int ndx) {
+          if (ndx == 1) return y
+          return 0
+        }
+        void setZ(int ndx, int v) {
+          if (ndx == 1) y = v
+        }
+        void setF(List x) {
+          f = x as double[]
+        }
+      }"
+    shell << ShellExecReq(cmd=code)
+    sleep(2)
+    a = agent(gw, "a")
+
+    @testset "parameter (get)" begin
+      flush(gw)
+      @test shell.language == "Groovy"
+      @test a.x == 1
+      @test a.s == "hello"
+      @test a.f == [1.0, 2.0]
+      @test a.b == nothing
+      @test a[1].z == 2
+      @test a[2].z == 0
+    end
+
+    @testset "parameter (set)" begin
+      flush(gw)
+      a.x = 7
+      @test a.x == 7
+      a.s = "hi"
+      @test a.s == "hi"
+      a.f = [2.1, 3.4]
+      @test a.f == [2.1, 3.4]
+      a[1].z = 14
+      @test a[1].z == 14
+    end
     close(gw)
 
   end

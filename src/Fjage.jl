@@ -11,10 +11,11 @@ Assuming fjåge master container is running on `localhost` at port 1100:
 
 ```julia-repl
 julia> using Fjage
-julia> ShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq");
 julia> gw = Gateway("localhost", 1100);
 julia> shell = agentforservice(gw, "org.arl.fjage.shell.Services.SHELL")
 shell
+julia> shell.language
+"Groovy"
 julia> request(gw, ShellExecReq(recipient=shell, cmd="ps"))
 AGREE
 julia> request(shell, ShellExecReq(cmd="ps"))
@@ -29,7 +30,7 @@ module Fjage
 using Sockets, Distributed, Base64, UUIDs, Dates, JSON
 
 # exported symbols
-export Performative, AgentID, Gateway, Message, GenericMessage, MessageClass, AbstractMessageClass
+export Performative, AgentID, Gateway, Message, GenericMessage, MessageClass, AbstractMessageClass, ParameterReq, ParameterRsp, ShellExecReq
 export agent, topic, send, receive, request, agentforservice, agentsforservice, subscribe, unsubscribe
 
 # package settings
@@ -254,8 +255,8 @@ the performative is assumed to be REQUEST, and for all other messages, INFORM.
 
 ```julia-repl
 julia> using Fjage
-julia> ShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq");
-julia> req = ShellExecReq(cmd="ps")
+julia> MyShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq");
+julia> req = MyShellExecReq(cmd="ps")
 ShellExecReq: REQUEST [cmd:"ps"]
 ```
 """
@@ -593,7 +594,7 @@ function Base.show(io::IO, msg::Message)
       else
         p *= " $k:" * _repr(data[k])
       end
-    elseif k != "sender" && k != "recipient" && k != "msgID" && k != "inReplyTo"
+    elseif k != "sender" && k != "recipient" && k != "msgID" && k != "inReplyTo" && k != "sentAt"
       if typeof(x) <: Number || typeof(x) == String || typeof(x) <: Array || typeof(x) == Bool
         p *= " $k:" * _repr(x)
       else
@@ -614,8 +615,8 @@ function Base.show(io::IO, msg::Message)
   if length(p) > 0
     s *= " [$p]"
   end
-  if msg.__clazz__ == "org.arl.fjage.Message"
-    m = match(r"^Message: (.*)$", s)
+  if msg.__clazz__ == "org.arl.fjage.GenericMessage"
+    m = match(r"^GenericMessage: (.*)$", s)
     if m != nothing
       s = m[1]
     end
@@ -626,6 +627,15 @@ end
 "Generic message type that can carry arbitrary name-value pairs as data."
 GenericMessage = MessageClass(@__MODULE__, "org.arl.fjage.GenericMessage")
 
+"Shell command execution request message."
+ShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq")
+
+"Parameter request message."
+ParameterReq = MessageClass(@__MODULE__, "org.arl.fjage.param.ParameterReq")
+
+"Parameter response message."
+ParameterRsp = MessageClass(@__MODULE__, "org.arl.fjage.param.ParameterRsp")
+
 """
     msg = Message([perf])
     msg = Message(inreplyto[, perf])
@@ -634,11 +644,57 @@ Create a message with just a performative (`perf`) and no data. If the performat
 is not specified, it defaults to INFORM. If the inreplyto is specified, the message
 `inReplyTo` and `recipient` fields are set accordingly.
 """
-Message(perf::String=Performative.INFORM) = GenericMessage(performative=perf)
-Message(inreplyto::Message, perf::String=Performative.INFORM) = GenericMessage(performative=perf, inReplyTo=inreplyto.msgID, recipient=inreplyto.sender)
+Message(perf::String=Performative.INFORM) = GenericMessage(perf=perf)
+Message(inreplyto::Message, perf::String=Performative.INFORM) = GenericMessage(perf=perf, inReplyTo=inreplyto.msgID, recipient=inreplyto.sender)
 
 # Base functions to add local methods
 Base.close(gw::Gateway) = close(gw)
 Base.flush(gw::Gateway) = flush(gw)
+
+# add notation AgentID.property
+
+function Base.getproperty(aid::AgentID, p::Symbol; ndx=-1)
+  if hasfield(AgentID, p)
+    return getfield(aid, p)
+  end
+  if getfield(aid, :owner) == nothing
+    return nothing
+  end
+  rsp = aid << ParameterReq(param=string(p), index=ndx)
+  if rsp == nothing
+    return nothing
+  end
+  return rsp.value
+end
+
+function Base.setproperty!(aid::AgentID, p::Symbol, value; ndx=-1)
+  if hasfield(AgentID, p)
+    setfield!(aid, p, v)
+    return
+  end
+  name = getfield(aid, :name)
+  if getfield(aid, :owner) == nothing
+    @warn "Unable to set $(name).$(p): unowned agent"
+    return
+  end
+  rsp = aid << ParameterReq(param=string(p), value=value, index=ndx)
+  if rsp == nothing
+    @warn "Unable to set $(name).$(p): no response"
+    return
+  end
+  if rsp.value != value
+    @warn "$(name).$(p) set to $(rsp.value)"
+  end
+end
+
+struct _IndexedAgentID
+  aid::AgentID
+  ndx::Int64
+end
+
+Base.getindex(aid::AgentID, ndx::Int64) = _IndexedAgentID(aid, ndx)
+Base.getproperty(iaid::_IndexedAgentID, p::Symbol) = Base.getproperty(getfield(iaid, :aid), p, ndx=getfield(iaid, :ndx))
+Base.setproperty!(iaid::_IndexedAgentID, p::Symbol, v) = Base.setproperty!(getfield(iaid, :aid), p, v, ndx=getfield(iaid, :ndx))
+Base.show(io::IO, iaid::_IndexedAgentID) = print(io, "$(getfield(getfield(iaid, :aid), :name))[$(getfield(iaid, :ndx))]")
 
 end
