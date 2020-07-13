@@ -10,7 +10,7 @@ Julia gateway that can connect to the [fjåge](https://github.com/org-arl/fjage)
 In Julia REPL:
 ```julia
 julia> # press "]" to enter package manager
-pkg> add https://github.com/org-arl/Fjage.jl
+pkg> add Fjage
 ```
 
 ## Example usage
