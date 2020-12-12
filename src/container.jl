@@ -1,71 +1,173 @@
+abstract type Platform end
+abstract type Container end
 abstract type Agent end
-
-function init(a::Agent) end
-function shutdown(a::Agent) end
-
-container(a::Agent) = a.container
-delay(a::Agent, millis) = sleep(millis/1000)
-AgentID(a::Agent) = agent(container(a), a)
-agent(a::Agent) = agent(container(a), a)
-currenttimemillis(a::Agent) = Dates.value(now())
-nanotime(a::Agent) = currenttimemillis(a) * 1000000
-
-# TODO: state, platform, store, agentforservice, register, deregister, receive, request, send, log, stop, die, subscribe, unsubsscribe
-
-mutable struct Container
-  agents::Dict{String,Agent}
-  running::Bool
-end
-
-Container() = Container(Dict{String,Agent}(), false)
-
-function add(c::Container, name::String, a::Agent)
-  canlocate(c, name) && throw(ArgumentError("Duplicate agent name"))
-  c.agents[name] = a
-  a.container = c
-  c.running && init(a)
-end
-
-function kill(c::Container, name::String)
-  containsagent(c, name) || throw(ArgumentError("No such agent"))
-  a = c.agents[name]
-  delete!(c.agents, name)
-  foreach(b -> stop(b), a.behaviors)
-  shutdown(a)
-end
-
-kill(c::Container, a::AgentID) = kill(c, a.name)
-
-function start(c::Container)
-  c.running && throw(ArgumentError("Container already running"))
-  c.running = true
-  foreach(kv -> init(kv[2]), c.agents)
-end
-
-function shutdown(c::Container)
-  c.running || throw(ArgumentError("Container not running"))
-  foreach(a -> kill(c, a), keys(c.agents))
-  empty!(c.agents)
-  c.running = false
-end
-
-agent(c::Container, name::String) = c.agents[name]
-agent(c::Container, a::Agent) = first(AgentID(name) for (name, a1) ∈ c.agents if a1 === a)
-
-containsagent(c::Container, a::AgentID) = a.name ∈ keys(c.agents)
-containsagent(c::Container, name::String) = name ∈ keys(c.agents)
-canlocate(c::Container, a) = containsagent(c, a)          # TODO: also check remote container
-
 abstract type Behavior end
+
+### realtime platform
+
+Base.@kwdef struct RealTimePlatform <: Platform
+  containers = Container[]
+  running = Ref(false)
+end
+
+Base.show(io::IO, p::RealTimePlatform) = println(io, "RealTimePlatform[running=", p.running[], ", containers=", length(p.containers), "]")
+
+currenttimemillis(::RealTimePlatform) = Dates.value(now())
+nanotime(::RealTimePlatform) = Dates.value(now()) * 1000000
+delay(::RealTimePlatform, millis) = sleep(millis/1000)
+
+containers(p::RealTimePlatform) = p.containers
+isrunning(p::RealTimePlatform) = p.running[]
+
+function add(p::RealTimePlatform, c::Container)
+  platform(c) === p || throw(ArgumentError("Container bound to another platform"))
+  push!(p.containers, c)
+  p.running[] && start(c)
+  nothing
+end
+
+function start(p::RealTimePlatform)
+  p.running[] && return
+  @debug "Starting RealTimePlatform..."
+  foreach(start, p.containers)
+  p.running[] = true
+  @debug "RealTimePlatform is running"
+  nothing
+end
+
+function shutdown(p::RealTimePlatform)
+  p.running[] || return
+  @debug "Stopping RealTimePlatform..."
+  foreach(shutdown, p.containers)
+  p.running[] = false
+  @debug "Stopped RealTimePlatform"
+  nothing
+end
+
+### standalone container
+
+struct AgentInfo{T <: Container}
+  aid::AgentID
+  agent::Agent
+  container::T
+  behaviors::Vector{Behavior}
+end
+
+const _agentinfo = IdDict{Agent,AgentInfo}()
+
+struct StandaloneContainer{T <: Platform} <: Container
+  platform::T
+  agents::Dict{String,AgentInfo}
+  running::Ref{Bool}
+end
+
+function Container(p)
+  c = StandaloneContainer(p, Dict{String,AgentInfo}(), Ref(false))
+  add(p, c)
+  c
+end
+
+Base.show(io::IO, c::StandaloneContainer) = println(io, "StandaloneContainer[running=", c.running[], ", platform=", typeof(c.platform), ", agents=", length(c.agents), "]")
+
+platform(c::StandaloneContainer) = c.platform
+isrunning(c::StandaloneContainer) = c.running[]
+
+containsagent(c::StandaloneContainer, aid::AgentID) = aid.name ∈ keys(c.agents)
+containsagent(c::StandaloneContainer, name::String) = name ∈ keys(c.agents)
+canlocate(c::StandaloneContainer, a) = containsagent(c, a)
+
+agent(c::StandaloneContainer, name::String) = c.agents[name]
+agent(c::StandaloneContainer, aid::AgentID) = agent(c, aid.name)
+
+function add(c::StandaloneContainer, name::String, a::Agent)
+  canlocate(c, name) && throw(ArgumentError("Duplicate agent name"))
+  ai = AgentInfo(AgentID(name), a, c, Behavior[])
+  c.agents[name] = ai
+  _agentinfo[a] = ai
+  c.running[] && init(a)
+  @debug "Added agent $(name)::$(typeof(a))"
+  nothing
+end
+
+add(c::StandaloneContainer, a::Agent) = add(c, string(typeof(a)) * "-" * string(uuid4())[1:8], a)
+
+function kill(c::StandaloneContainer, name::String)
+  containsagent(c, name) || return false
+  ai = c.agents[name]
+  if c.running[]
+    foreach(stop, ai.behaviors)
+    shutdown(ai.agent)
+  end
+  delete!(c.agents, name)
+  delete!(_agentinfo, ai.agent)
+  @debug "Killed agent $(name)"
+  true
+end
+
+kill(c::StandaloneContainer, aid::AgentID) = kill(c, aid.name)
+kill(c::StandaloneContainer, a::Agent) = kill(c, AgentID(a))
+
+function start(c::StandaloneContainer)
+  c.running[] && return
+  @debug "Starting StandaloneContainer..."
+  c.running[] = true
+  foreach(kv -> init(kv[2].agent), c.agents)
+  @debug "StandaloneContainer is running"
+  nothing
+end
+
+function shutdown(c::StandaloneContainer)
+  c.running[] || return
+  @debug "Stopping StandaloneContainer..."
+  foreach(name -> kill(c, name), keys(c.agents))
+  foreach(ai -> delete!(_agentinfo, ai.agent), values(c.agents))
+  empty!(c.agents)
+  c.running[] = false
+  @debug "Stopped StandaloneContainer"
+  nothing
+end
+
+ps(c::StandaloneContainer) = collect((kv[1], typeof(kv[2].agent)) for kv ∈ c.agents)
+
+### agent
+
+function init(a::Agent)
+  @debug "Agent $(AgentID(a)) initialized"
+end
+
+function shutdown(a::Agent)
+  @debug "Agent $(AgentID(a)) terminated"
+end
+
+container(a::Agent) = _agentinfo[a].container
+platform(a::Agent) = platform(container(a))
+AgentID(a::Agent) = _agentinfo[a].aid
+
+currenttimemillis(a::Agent) = currenttimemillis(platform(a))
+nanotime(a::Agent) = nanotime(platform(a))
+delay(a::Agent, millis) = delay(platform(a), millis)
+
+function add(a::Agent, b::Behavior)
+  (b.agent === nothing && b.done == false) || throw(ArgumentError("Behavior already running"))
+  a ∈ keys(_agentinfo) || throw(ArgumentError("Agent not running"))
+  b.agent = a
+  ai = _agentinfo[a]
+  @debug "Add $(typeof(b)) to agent $(ai.aid)"
+  push!(ai.behaviors, b)
+  @async action(b)
+  nothing
+end
+
+### behaviors
 
 agent(b::Behavior) = b.agent
 done(b::Behavior) = b.done
 priority(b::Behavior) = b.priority
 
-# TODO: block(b, millis)
 function block(b::Behavior)
   b.done && return
   b.block = Condition()
+  nothing
 end
 
 function restart(b::Behavior)
@@ -74,18 +176,21 @@ function restart(b::Behavior)
   oblock = b.block
   b.block = nothing
   notify(oblock)
+  nothing
 end
 
 function reset(b::Behavior)
-  b.agent === nothing || remove!(b.agent.behaviors, b)
+  b.agent === nothing || remove!(_agentinfo[b.agent].behaviors, b)
   b.agent = nothing
   b.done = false
+  nothing
 end
 
 Base.reset(b::Behavior) = reset(b)
 
 function stop(b::Behavior)
   b.done = true
+  nothing
 end
 
 mutable struct OneShotBehavior <: Behavior
@@ -110,7 +215,7 @@ function action(b::OneShotBehavior)
     @warn ex
   end
   b.done = true
-  remove!(b.agent.behaviors, b)
+  remove!(_agentinfo[b.agent].behaviors, b)
   b.agent = nothing
 end
 
@@ -142,7 +247,7 @@ function action(b::CyclicBehavior)
     @warn ex
   end
   b.done = true
-  remove!(b.agent.behaviors, b)
+  remove!(_agentinfo[b.agent].behaviors, b)
   b.agent = nothing
 end
 
@@ -163,14 +268,16 @@ function action(b::WakerBehavior)
   try
     b.onstart === nothing || b.onstart(b.agent, b)
     sleep(b.millis/1000)
-    b.block === nothing || wait(b.block)
-    b.action === nothing || b.action(b.agent, b)
+    if !b.done
+      b.block === nothing || wait(b.block)
+      b.action === nothing || b.action(b.agent, b)
+    end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
     @warn ex
   end
   b.done = true
-  remove!(b.agent.behaviors, b)
+  remove!(_agentinfo[b.agent].behaviors, b)
   b.agent = nothing
 end
 
@@ -192,6 +299,7 @@ function action(b::TickerBehavior)
     b.onstart === nothing || b.onstart(b.agent, b)
     while !b.done
       sleep(b.millis/1000)    # TODO: improve tick timing
+      b.done && break
       if b.block === nothing
         b.action === nothing || b.action(b.agent, b)
       else
@@ -203,7 +311,7 @@ function action(b::TickerBehavior)
     @warn ex
   end
   b.done = true
-  remove!(b.agent.behaviors, b)
+  remove!(_agentinfo[b.agent].behaviors, b)
   b.agent = nothing
 end
 
@@ -219,16 +327,3 @@ end
 # end
 
 # MessageBehavior(filter, action) = MessageBehavior(nothing, filter, nothing, false, 0, nothing, action, nothing)
-
-# TODO: implement
-# struct BackoffBehavior <: Behavior end
-# struct PoissonBehavior <: Behavior end
-# struct FSMBehavior <: Behavior end
-# struct TestBehavior <: Behavior end
-
-function add(a::Agent, b::Behavior)
-  (b.agent === nothing && b.done == false) || throw(ArgumentError("Behavior already running"))
-  b.agent = a
-  push!(a.behaviors, b)
-  @async action(b)
-end

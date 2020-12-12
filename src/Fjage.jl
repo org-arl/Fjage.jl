@@ -32,9 +32,12 @@ using Sockets, Distributed, Base64, UUIDs, Dates, JSON
 # exported symbols
 export Performative, AgentID, Gateway, Message, GenericMessage, MessageClass, AbstractMessageClass, ParameterReq, ParameterRsp, ShellExecReq
 export agent, topic, send, receive, request, agentforservice, agentsforservice, subscribe, unsubscribe
-export Agent, Behavior, OneShotBehavior, CyclicBehavior, WakerBehavior, TickerBehavior
-export init, shutdown, agent, done, priority, block, restart, stop, done, priority, container
-export Container, add, kill, delay, currenttimemillis, nanotime, containsagent, canlocate, start
+
+export RealTimePlatform, currenttimemillis, nanotime, delay, containers, isrunning, add, start, shutdown
+export Container, kill, containsagent, canlocate, agent, platform, ps
+export Agent, init, container
+export Behavior, done, priority, block, restart, stop
+export OneShotBehavior, CyclicBehavior, WakerBehavior, TickerBehavior
 
 include("core.jl")
 include("gw.jl")
