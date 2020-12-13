@@ -156,7 +156,7 @@ macro agent(sdef)
   @capture(sdef, struct T_ fields__ end)
   push!(fields, :(_aid::Union{AgentID,Nothing} = nothing))
   push!(fields, :(_container::Union{Container,Nothing} = nothing))
-  push!(fields, :(_behaviors::Vector{Behavior} = Behavior[]))
+  push!(fields, :(_behaviors::Set{Behavior} = Set{Behavior}()))
   push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
   push!(fields, :(_msgqueue::Vector{Message} = Message[]))
   :( Base.@kwdef mutable struct $T <: Agent; $(fields...); end ) |> esc
@@ -183,9 +183,14 @@ delay(a::Agent, millis) = delay(platform(a), millis)
 subscribe(a::Agent, t::AgentID) = subscribe(container(a), t, a)
 unsubscribe(a::Agent, t::AgentID) = unsubscribe(container(a), t, a)
 
-send(a::Agent, msg::Message) = _deliver(container(a), msg)
+function send(a::Agent, msg::Message)
+  @debug "sending $(msg)"
+  msg.sender = AgentID(a)
+  _deliver(container(a), msg)
+end
 
 function receive(a::Agent, filt, timeout::Int=0; priority=(filt===nothing ? 0 : -100))
+  (container(a) === nothing || !isrunning(container(a))) && return nothing
   for (n, msg) ∈ enumerate(a._msgqueue)
     if _matches(filt, msg)
       deleteat!(a._msgqueue, n)
@@ -208,6 +213,15 @@ function receive(a::Agent, filt, timeout::Int=0; priority=(filt===nothing ? 0 : 
 end
 
 receive(a::Agent, timeout::Int=0) = receive(a, nothing, timeout)
+
+function request(a::Agent, msg::Message, timeout::Int=1000)
+  send(a, msg)
+  receive(a, msg, timeout)
+end
+
+flush(a::Agent) = empty!(a._msgqueue)
+
+Base.flush(a::Agent) = flush(a)
 
 function _listen(a::Agent, ch::Channel, filt, priority::Int)
   for (n, (filt1, ch1, p)) ∈ enumerate(a._listeners)
@@ -280,7 +294,7 @@ function restart(b::Behavior)
 end
 
 function reset(b::Behavior)
-  b.agent === nothing || remove!(b.agent._behaviors, b)
+  b.agent === nothing || delete!(b.agent._behaviors, b)
   b.agent = nothing
   b.done = false
   nothing
@@ -315,7 +329,7 @@ function action(b::OneShotBehavior)
     @warn ex
   end
   b.done = true
-  remove!(b.agent._behaviors, b)
+  delete!(b.agent._behaviors, b)
   b.agent = nothing
 end
 
@@ -347,7 +361,7 @@ function action(b::CyclicBehavior)
     @warn ex
   end
   b.done = true
-  remove!(b.agent._behaviors, b)
+  delete!(b.agent._behaviors, b)
   b.agent = nothing
 end
 
@@ -377,7 +391,7 @@ function action(b::WakerBehavior)
     @warn ex
   end
   b.done = true
-  remove!(b.agent._behaviors, b)
+  delete!(b.agent._behaviors, b)
   b.agent = nothing
 end
 
@@ -411,7 +425,7 @@ function action(b::TickerBehavior)
     @warn ex
   end
   b.done = true
-  remove!(b.agent._behaviors, b)
+  delete!(b.agent._behaviors, b)
   b.agent = nothing
 end
 
@@ -434,14 +448,14 @@ function action(b::MessageBehavior)
     b.onstart === nothing || b.onstart(b.agent, b)
     while !b.done
       msg = receive(b.agent, b.filt, BLOCKING; priority=b.priority)
-      msg !== nothing && b.action !== nothing && b.action(b.agent, b, msg)
+      msg === nothing || b.action === nothing || b.action(b.agent, b, msg)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
     @warn ex
   end
   b.done = true
-  remove!(b.agent._behaviors, b)
+  delete!(b.agent._behaviors, b)
   b.agent = nothing
 end
 

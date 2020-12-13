@@ -11,7 +11,7 @@ struct Gateway
   subscriptions::Dict{String,Bool}
   pending::Dict{String,Channel}
   queue::Channel
-  function Gateway(name::String, host::String, port::Integer)
+  function Gateway(name::String, host::String, port::Int)
     gw = new(
       AgentID(name, false),
       connect(host, port),
@@ -20,11 +20,11 @@ struct Gateway
       Channel(MAX_QUEUE_LEN)
     )
     @async _run(gw)
-    return gw
+    gw
   end
 end
 
-Gateway(host::String, port::Integer) = Gateway("julia-gw-" * string(uuid1()), host, port)
+Gateway(host::String, port::Int) = Gateway("julia-gw-" * string(uuid1()), host, port)
 
 Base.show(io::IO, gw::Gateway) = print(io, gw.agentID.name)
 
@@ -111,9 +111,9 @@ function agentforservice(gw::Gateway, svc::String)
   rq = Dict("action" => "agentForService", "service" => svc)
   rsp = _ask(gw, rq)
   if haskey(rsp, "agentID")
-    return AgentID(rsp["agentID"], false, gw)
+    AgentID(rsp["agentID"], false, gw)
   else
-    return nothing
+    nothing
   end
 end
 
@@ -121,14 +121,14 @@ end
 function agentsforservice(gw::Gateway, svc::String)
   rq = Dict("action" => "agentsForService", "service" => svc)
   rsp = _ask(gw, rq)
-  return [AgentID(a, false, gw) for a in rsp["agentIDs"]]
+  [AgentID(a, false, gw) for a in rsp["agentIDs"]]
 end
 
 "Subscribe to receive all messages sent to the given topic."
 function subscribe(gw::Gateway, aid::AgentID)
   gw.subscriptions[string(topic(gw, aid))] = true
   _update_watch(gw)
-  return true
+  true
 end
 
 "Unsubscribe from receiving messages sent to the given topic."
@@ -139,7 +139,7 @@ function unsubscribe(gw::Gateway, aid::AgentID)
     _update_watch(gw)
     return true
   end
-  return false
+  false
 end
 
 "Close a gateway connection to the master container."
@@ -215,7 +215,7 @@ function _inflate(json)
     end
     obj.__data__[k] = v
   end
-  return obj
+  obj
 end
 
 """
@@ -244,7 +244,7 @@ field is set to the `msgID` of the specified message is retrieved. If it is a fu
 it must take in a message and return `true` or `false`. A message for which it returns
 `true` is retrieved.
 """
-function receive(gw::Gateway, timeout::Integer=0)
+function receive(gw::Gateway, timeout::Int=0)
   if isready(gw.queue)
     return take!(gw.queue)
   end
@@ -263,10 +263,10 @@ function receive(gw::Gateway, timeout::Integer=0)
   end
   rv = take!(gw.queue)
   waiting = false
-  return rv
+  rv
 end
 
-function receive(gw::Gateway, filt, timeout::Integer=0)
+function receive(gw::Gateway, filt, timeout::Int=0)
   t1 = now() + Millisecond(timeout)
   cache = []
   while true
@@ -293,9 +293,9 @@ Send a request via the gateway to the specified agent, and wait for a response. 
 The `recipient` field of the request message (`msg`) must be populated with an agentID. The timeout
 is specified in milliseconds, and defaults to 1 second if unspecified.
 """
-function request(gw::Gateway, msg::Message, timeout::Integer=1000)
+function request(gw::Gateway, msg::Message, timeout::Int=1000)
   send(gw, msg)
-  return receive(gw, msg, timeout)
+  receive(gw, msg, timeout)
 end
 
 "Flush the incoming message queue."

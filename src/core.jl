@@ -173,7 +173,7 @@ The agentID (`aid`) specified must be an "owned" agentID obtained from the `agen
 or returned by the `agentforservice(gw, service)` function. The timeout is specified in milliseconds,
 and defaults to 1 second if unspecified.
 """
-function request(aid::AgentID, msg::Message, timeout::Integer=1000)
+function request(aid::AgentID, msg::Message, timeout::Int=1000)
   send(aid, msg)
   return receive(aid.owner, msg, timeout)
 end
