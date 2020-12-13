@@ -154,9 +154,7 @@ end
 
 # helper function to see if a message matches a filter
 function _matches(filt, msg)
-  if msg == nothing
-    return true
-  end
+  (msg === nothing || filt === nothing) && return true
   if typeof(filt) == DataType
     return typeof(msg) <: filt
   elseif typeof(filt) <: Message
@@ -164,7 +162,7 @@ function _matches(filt, msg)
   elseif typeof(filt) <: Function
     return filt(msg)
   end
-  return false
+  false
 end
 
 """

@@ -49,12 +49,12 @@ end
 struct StandaloneContainer{T <: Platform} <: Container
   platform::T
   agents::Dict{String,Agent}
-  topics::Dict{AgentID,Vector{Agent}}
+  topics::Dict{AgentID,Set{Agent}}
   running::Ref{Bool}
 end
 
 function Container(p)
-  c = StandaloneContainer(p, Dict{String,Agent}(), Dict{AgentID,Vector{Agent}}(), Ref(false))
+  c = StandaloneContainer(p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(), Ref(false))
   add(p, c)
   c
 end
@@ -102,6 +102,8 @@ end
 kill(c::StandaloneContainer, aid::AgentID) = kill(c, aid.name)
 kill(c::StandaloneContainer, a::Agent) = kill(c, AgentID(a))
 
+Base.kill(c::StandaloneContainer, a) = kill(c, a)
+
 function start(c::StandaloneContainer)
   c.running[] && return
   @debug "Starting StandaloneContainer..."
@@ -135,6 +137,19 @@ function unsubscribe(c::StandaloneContainer, t::AgentID, a::Agent)
   nothing
 end
 
+function _deliver(c::StandaloneContainer, msg::Message)
+  c.running[] || return
+  if msg.recipient.name ∈ keys(c.agents)
+    _deliver(c.agents[msg.recipient.name], msg)
+  elseif msg.recipient ∈ keys(c.topics)
+    foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
+  else
+    @debug "Message $(msg) undeliverable"
+  end
+end
+
+_deliver(::Nothing, msg::Message) = @debug "Delivered message $(msg) to nowhere"
+
 ### agent
 
 macro agent(sdef)
@@ -142,6 +157,8 @@ macro agent(sdef)
   push!(fields, :(_aid::Union{AgentID,Nothing} = nothing))
   push!(fields, :(_container::Union{Container,Nothing} = nothing))
   push!(fields, :(_behaviors::Vector{Behavior} = Behavior[]))
+  push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
+  push!(fields, :(_msgqueue::Vector{Message} = Message[]))
   :( Base.@kwdef mutable struct $T <: Agent; $(fields...); end ) |> esc
 end
 
@@ -166,6 +183,73 @@ delay(a::Agent, millis) = delay(platform(a), millis)
 subscribe(a::Agent, t::AgentID) = subscribe(container(a), t, a)
 unsubscribe(a::Agent, t::AgentID) = unsubscribe(container(a), t, a)
 
+send(a::Agent, msg::Message) = _deliver(container(a), msg)
+
+function receive(a::Agent, filt, timeout::Int=0; priority=(filt===nothing ? 0 : -100))
+  for (n, msg) ∈ enumerate(a._msgqueue)
+    if _matches(filt, msg)
+      deleteat!(a._msgqueue, n)
+      return msg
+    end
+  end
+  timeout == 0 && return nothing
+  ch = Channel{Union{Message,Nothing}}(1)
+  _listen(a, ch, filt, priority)
+  if timeout > 0
+    @async begin
+      delay(a, timeout)
+      put!(ch, nothing)
+    end
+  end
+  msg = take!(ch)
+  _dont_listen(a, ch)
+  Base.close(ch)
+  msg
+end
+
+receive(a::Agent, timeout::Int=0) = receive(a, nothing, timeout)
+
+function _listen(a::Agent, ch::Channel, filt, priority::Int)
+  for (n, (filt1, ch1, p)) ∈ enumerate(a._listeners)
+    if p > priority
+      insert!(a._listeners, n, (filt, ch, priority))
+      return
+    end
+  end
+  push!(a._listeners, (filt, ch, priority))
+end
+
+function _dont_listen(a::Agent, ch::Channel)
+  for (n, (filt, ch1, p)) ∈ enumerate(a._listeners)
+    if ch === ch1
+      deleteat!(a._listeners, n)
+      return
+    end
+  end
+end
+
+function _listener_notify(a::Agent)
+  for (filt, ch, p) ∈ a._listeners
+    put!(ch, nothing)
+  end
+end
+
+function _deliver(a::Agent, msg::Message)
+  @debug "$(a) <<< $(msg)"
+  for (filt, ch, p) ∈ a._listeners
+    if _matches(filt, msg)
+      put!(ch, msg)
+      return
+    end
+  end
+  push!(a._msgqueue, msg)
+  while length(a._msgqueue) > MAX_QUEUE_LEN
+    popfirst!(a._msgqueue)
+  end
+end
+
+### behaviors
+
 function add(a::Agent, b::Behavior)
   (b.agent === nothing && b.done == false) || throw(ArgumentError("Behavior already running"))
   (container(a) === nothing || !isrunning(container(a))) && throw(ArgumentError("Agent not running"))
@@ -175,8 +259,6 @@ function add(a::Agent, b::Behavior)
   @async action(b)
   nothing
 end
-
-### behaviors
 
 agent(b::Behavior) = b.agent
 done(b::Behavior) = b.done
@@ -280,7 +362,7 @@ mutable struct WakerBehavior <: Behavior
   onend::Union{Nothing,Function}
 end
 
-WakerBehavior(millis::Int64, action) = WakerBehavior(nothing, millis, nothing, false, 0, nothing, action, nothing)
+WakerBehavior(action, millis::Int64) = WakerBehavior(nothing, millis, nothing, false, 0, nothing, action, nothing)
 
 function action(b::WakerBehavior)
   try
@@ -310,7 +392,7 @@ mutable struct TickerBehavior <: Behavior
   onend::Union{Nothing,Function}
 end
 
-TickerBehavior(millis::Int64, action) = TickerBehavior(nothing, millis, nothing, false, 0, nothing, action, nothing)
+TickerBehavior(action, millis::Int64) = TickerBehavior(nothing, millis, nothing, false, 0, nothing, action, nothing)
 
 function action(b::TickerBehavior)
   try
@@ -333,15 +415,38 @@ function action(b::TickerBehavior)
   b.agent = nothing
 end
 
-# mutable struct MessageBehavior <: Behavior
-#   agent::Union{Nothing,Agent}
-#   filter
-#   bUnion{Nothing,lock::Condition}
-#   done::Bool
-#   priority::Int
-#   onstart::Union{Nothing,Function}
-#   action::Union{Nothing,Function}
-#   onend::Union{Nothing,Function}
-# end
+mutable struct MessageBehavior <: Behavior
+  agent::Union{Nothing,Agent}
+  filt::Any
+  block::Union{Nothing,Condition}
+  done::Bool
+  priority::Int
+  onstart::Union{Nothing,Function}
+  action::Union{Nothing,Function}
+  onend::Union{Nothing,Function}
+end
 
-# MessageBehavior(filter, action) = MessageBehavior(nothing, filter, nothing, false, 0, nothing, action, nothing)
+MessageBehavior(action) = MessageBehavior(nothing, nothing, nothing, false, 0, nothing, action, nothing)
+MessageBehavior(action, filt) = MessageBehavior(nothing, filt, nothing, false, (filt===nothing ? 0 : -100), nothing, action, nothing)
+
+function action(b::MessageBehavior)
+  try
+    b.onstart === nothing || b.onstart(b.agent, b)
+    while !b.done
+      msg = receive(b.agent, b.filt, BLOCKING; priority=b.priority)
+      msg !== nothing && b.action !== nothing && b.action(b.agent, b, msg)
+    end
+    b.onend === nothing || b.onend(b.agent, b)
+  catch ex
+    @warn ex
+  end
+  b.done = true
+  remove!(b.agent._behaviors, b)
+  b.agent = nothing
+end
+
+function stop(b::MessageBehavior)
+  b.done = true
+  _listener_notify(b.agent)
+  nothing
+end

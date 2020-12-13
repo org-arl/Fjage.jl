@@ -1,6 +1,3 @@
-# package settings
-const MAX_QUEUE_LEN = 256
-
 """
     gw = Gateway([name,] host, port)
 
