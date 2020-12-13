@@ -10,7 +10,7 @@ Base.@kwdef struct RealTimePlatform <: Platform
   running = Ref(false)
 end
 
-Base.show(io::IO, p::RealTimePlatform) = println(io, "RealTimePlatform[running=", p.running[], ", containers=", length(p.containers), "]")
+Base.show(io::IO, p::RealTimePlatform) = print(io, "RealTimePlatform[running=", p.running[], ", containers=", length(p.containers), "]")
 
 currenttimemillis(::RealTimePlatform) = Dates.value(now())
 nanotime(::RealTimePlatform) = Dates.value(now()) * 1000000
@@ -46,28 +46,20 @@ end
 
 ### standalone container
 
-struct AgentInfo{T <: Container}
-  aid::AgentID
-  agent::Agent
-  container::T
-  behaviors::Vector{Behavior}
-end
-
-const _agentinfo = IdDict{Agent,AgentInfo}()
-
 struct StandaloneContainer{T <: Platform} <: Container
   platform::T
-  agents::Dict{String,AgentInfo}
+  agents::Dict{String,Agent}
+  topics::Dict{AgentID,Vector{Agent}}
   running::Ref{Bool}
 end
 
 function Container(p)
-  c = StandaloneContainer(p, Dict{String,AgentInfo}(), Ref(false))
+  c = StandaloneContainer(p, Dict{String,Agent}(), Dict{AgentID,Vector{Agent}}(), Ref(false))
   add(p, c)
   c
 end
 
-Base.show(io::IO, c::StandaloneContainer) = println(io, "StandaloneContainer[running=", c.running[], ", platform=", typeof(c.platform), ", agents=", length(c.agents), "]")
+Base.show(io::IO, c::StandaloneContainer) = print(io, "StandaloneContainer[running=", c.running[], ", platform=", typeof(c.platform), ", agents=", length(c.agents), "]")
 
 platform(c::StandaloneContainer) = c.platform
 isrunning(c::StandaloneContainer) = c.running[]
@@ -81,9 +73,9 @@ agent(c::StandaloneContainer, aid::AgentID) = agent(c, aid.name)
 
 function add(c::StandaloneContainer, name::String, a::Agent)
   canlocate(c, name) && throw(ArgumentError("Duplicate agent name"))
-  ai = AgentInfo(AgentID(name), a, c, Behavior[])
-  c.agents[name] = ai
-  _agentinfo[a] = ai
+  a._container = c
+  a._aid = AgentID(name)
+  c.agents[name] = a
   c.running[] && init(a)
   @debug "Added agent $(name)::$(typeof(a))"
   nothing
@@ -93,13 +85,16 @@ add(c::StandaloneContainer, a::Agent) = add(c, string(typeof(a)) * "-" * string(
 
 function kill(c::StandaloneContainer, name::String)
   containsagent(c, name) || return false
-  ai = c.agents[name]
+  a = c.agents[name]
   if c.running[]
-    foreach(stop, ai.behaviors)
-    shutdown(ai.agent)
+    foreach(stop, a._behaviors)
+    shutdown(a)
   end
+  a._container = nothing
+  a._aid = nothing
+  empty!(a._behaviors)
+  foreach(kv -> delete!(kv[2], a), c.topics)
   delete!(c.agents, name)
-  delete!(_agentinfo, ai.agent)
   @debug "Killed agent $(name)"
   true
 end
@@ -111,7 +106,7 @@ function start(c::StandaloneContainer)
   c.running[] && return
   @debug "Starting StandaloneContainer..."
   c.running[] = true
-  foreach(kv -> init(kv[2].agent), c.agents)
+  foreach(kv -> init(kv[2]), c.agents)
   @debug "StandaloneContainer is running"
   nothing
 end
@@ -120,16 +115,37 @@ function shutdown(c::StandaloneContainer)
   c.running[] || return
   @debug "Stopping StandaloneContainer..."
   foreach(name -> kill(c, name), keys(c.agents))
-  foreach(ai -> delete!(_agentinfo, ai.agent), values(c.agents))
   empty!(c.agents)
   c.running[] = false
   @debug "Stopped StandaloneContainer"
   nothing
 end
 
-ps(c::StandaloneContainer) = collect((kv[1], typeof(kv[2].agent)) for kv ∈ c.agents)
+ps(c::StandaloneContainer) = collect((kv[1], typeof(kv[2])) for kv ∈ c.agents)
+
+function subscribe(c::StandaloneContainer, t::AgentID, a::Agent)
+  t ∈ keys(c.topics) || (c.topics[t] = Agent[])
+  push!(c.topics[t], a)
+  nothing
+end
+
+function unsubscribe(c::StandaloneContainer, t::AgentID, a::Agent)
+  t ∈ keys(c.topics) || return
+  delete!(c.topics[t], a)
+  nothing
+end
 
 ### agent
+
+macro agent(sdef)
+  @capture(sdef, struct T_ fields__ end)
+  push!(fields, :(_aid::Union{AgentID,Nothing} = nothing))
+  push!(fields, :(_container::Union{Container,Nothing} = nothing))
+  push!(fields, :(_behaviors::Vector{Behavior} = Behavior[]))
+  :( Base.@kwdef mutable struct $T <: Agent; $(fields...); end ) |> esc
+end
+
+Base.show(io::IO, a::Agent) = print(io, typeof(a), "(", something(AgentID(a), "-"), ")")
 
 function init(a::Agent)
   @debug "Agent $(AgentID(a)) initialized"
@@ -139,21 +155,23 @@ function shutdown(a::Agent)
   @debug "Agent $(AgentID(a)) terminated"
 end
 
-container(a::Agent) = _agentinfo[a].container
 platform(a::Agent) = platform(container(a))
-AgentID(a::Agent) = _agentinfo[a].aid
+container(a::Agent) = a._container
+AgentID(a::Agent) = a._aid
 
 currenttimemillis(a::Agent) = currenttimemillis(platform(a))
 nanotime(a::Agent) = nanotime(platform(a))
 delay(a::Agent, millis) = delay(platform(a), millis)
 
+subscribe(a::Agent, t::AgentID) = subscribe(container(a), t, a)
+unsubscribe(a::Agent, t::AgentID) = unsubscribe(container(a), t, a)
+
 function add(a::Agent, b::Behavior)
   (b.agent === nothing && b.done == false) || throw(ArgumentError("Behavior already running"))
-  a ∈ keys(_agentinfo) || throw(ArgumentError("Agent not running"))
+  (container(a) === nothing || !isrunning(container(a))) && throw(ArgumentError("Agent not running"))
   b.agent = a
-  ai = _agentinfo[a]
-  @debug "Add $(typeof(b)) to agent $(ai.aid)"
-  push!(ai.behaviors, b)
+  @debug "Add $(typeof(b)) to agent $(a._aid)"
+  push!(a._behaviors, b)
   @async action(b)
   nothing
 end
@@ -180,7 +198,7 @@ function restart(b::Behavior)
 end
 
 function reset(b::Behavior)
-  b.agent === nothing || remove!(_agentinfo[b.agent].behaviors, b)
+  b.agent === nothing || remove!(b.agent._behaviors, b)
   b.agent = nothing
   b.done = false
   nothing
@@ -215,7 +233,7 @@ function action(b::OneShotBehavior)
     @warn ex
   end
   b.done = true
-  remove!(_agentinfo[b.agent].behaviors, b)
+  remove!(b.agent._behaviors, b)
   b.agent = nothing
 end
 
@@ -247,7 +265,7 @@ function action(b::CyclicBehavior)
     @warn ex
   end
   b.done = true
-  remove!(_agentinfo[b.agent].behaviors, b)
+  remove!(b.agent._behaviors, b)
   b.agent = nothing
 end
 
@@ -277,7 +295,7 @@ function action(b::WakerBehavior)
     @warn ex
   end
   b.done = true
-  remove!(_agentinfo[b.agent].behaviors, b)
+  remove!(b.agent._behaviors, b)
   b.agent = nothing
 end
 
@@ -311,7 +329,7 @@ function action(b::TickerBehavior)
     @warn ex
   end
   b.done = true
-  remove!(_agentinfo[b.agent].behaviors, b)
+  remove!(b.agent._behaviors, b)
   b.agent = nothing
 end
 
