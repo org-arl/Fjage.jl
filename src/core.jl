@@ -98,6 +98,7 @@ function MessageClass(context, clazz::String, superclass=nothing, performative=n
       struct $(tname) <: $(superclass)
         clazz::String
         data::Dict{String,Any}
+        $(tname)(c::String, d::Dict{String,Any}) = new(c, d)
       end
     """),
     Meta.parse("""
@@ -332,3 +333,65 @@ Base.getindex(aid::AgentID, ndx::Int64) = _IndexedAgentID(aid, ndx)
 Base.getproperty(iaid::_IndexedAgentID, p::Symbol) = Base.getproperty(getfield(iaid, :aid), p, ndx=getfield(iaid, :ndx))
 Base.setproperty!(iaid::_IndexedAgentID, p::Symbol, v) = Base.setproperty!(getfield(iaid, :aid), p, v, ndx=getfield(iaid, :ndx))
 Base.show(io::IO, iaid::_IndexedAgentID) = print(io, "$(getfield(getfield(iaid, :aid), :name))[$(getfield(iaid, :ndx))]")
+
+# convenience methods and pretty printing for parameters
+
+function org_arl_fjage_param_ParameterReq(vals...; index=-1)
+  req = ParameterReq(index=index)
+  qlist = Pair{String,Any}[]
+  for v ∈ vals
+    if v isa String
+      push!(qlist, Pair{String,Any}(v, nothing))
+    elseif v isa Symbol
+      push!(qlist, Pair{String,Any}(string(v), nothing))
+    elseif v isa Pair
+      push!(qlist, Pair{String,Any}(string(v[1]), v[2]))
+    end
+  end
+  if length(qlist) > 0
+    q = popfirst!(qlist)
+    req.param = q[1]
+    req.value = q[2]
+    length(qlist) > 0 && (req.requests = Dict(qlist))
+  end
+  req
+end
+
+function Base.show(io::IO, p::ParameterRsp)
+  plist = Pair{String,Any}[]
+  if p.param !== nothing
+    x = p.param
+    occursin(".", x) || (x = "." * x)
+    push!(plist, x => p.value)
+    vs = p.values
+    if vs !== nothing
+      for v ∈ vs
+        x = v[1]
+        occursin(".", x) || (x = "." * x)
+        push!(plist, x => v[2])
+      end
+    end
+  end
+  sort!(plist; by=(x -> x[1]))
+  let n = findfirst(x -> x[1] == ".title", plist)
+    n === nothing || println(io, "« ", plist[n][2], " »\n")
+  end
+  let n = findfirst(x -> x[1] == ".description", plist)
+    n === nothing || plist[n][2] == "" || println(io, plist[n][2], "\n")
+  end
+  prefix = ""
+  ro = p.readonly === nothing ? String[] : p.readonly
+  for (k, v) ∈ plist
+    k === ".type" && continue
+    k === ".title" && continue
+    k === ".description" && continue
+    ks = split(k, '.')
+    cprefix = join(ks[1:end-1], '.')
+    if cprefix != prefix
+      prefix != "" && println(io)
+      prefix = cprefix
+      println(io, '[', cprefix, ']')
+    end
+    println(io, "  ", ks[end], k ∈ ro ? " ⤇ " : " = ", v)
+  end
+end

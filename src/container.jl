@@ -474,23 +474,22 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
   ndx = something(msg.index, -1)
   plist = ndx < 0 ? params(a) : params(a, ndx)
   req = Tuple{String,Symbol,Any}[]
-  if msg.param !== nothing
-    rr = _resolve(plist, msg.param, ndx)
-    rr === nothing || push!(req, (rr[1], rr[2], msg.value))
-  end
-  let preqs = msg.requests
-    if preqs !== nothing
-      for r ∈ preqs
-        rr = _resolve(plist, r["param"], ndx)
-        rr === nothing || push!(req, (rr[1], rr[2], "value" ∈ keys(r) ? r["value"] : nothing))
-      end
-    end
-  end
-  if length(req) == 0
+  if msg.param === nothing
     push!(req, ("title", :title, nothing))
     push!(req, ("description", :description, nothing))
     for kv ∈ plist
       push!(req, (kv..., nothing))
+    end
+  else
+    rr = _resolve(plist, msg.param, ndx)
+    rr === nothing || push!(req, (rr[1], rr[2], msg.value))
+    let preqs = msg.requests
+      if preqs !== nothing
+        for r ∈ preqs
+          rr = _resolve(plist, r["param"], ndx)
+          rr === nothing || push!(req, (rr[1], rr[2], "value" ∈ keys(r) ? r["value"] : nothing))
+        end
+      end
     end
   end
   # perform requests
@@ -532,7 +531,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
             end
             x === missing || x === nothing || push!(rsp, q => x)
           elseif hasfield(typeof(a), p)
-            x = setfield!(a, p)
+            x = setfield!(a, p, v)
             push!(rsp, q => x)
           end
         else
@@ -557,6 +556,9 @@ end
 
 function _resolve(plist, p, ndx)
   psym = Symbol(p)
+  psym === :type && return p, psym
+  psym === :title && return p, psym
+  psym === :description && return p, psym
   for kv ∈ plist
     kv[1] == p && return kv
     kv[2] === psym && return kv
