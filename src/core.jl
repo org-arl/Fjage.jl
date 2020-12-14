@@ -37,7 +37,17 @@ See also: [`agent`](@ref), [`topic`](@ref)
 AgentID(name::String) = name[1] == '#' ? AgentID(name[2:end], true, nothing) : AgentID(name, false, nothing)
 AgentID(name::String, istopic::Bool) = AgentID(name, istopic, nothing)
 
-Base.show(io::IO, aid::AgentID) = print(io, aid.istopic ? "#"*aid.name : aid.name)
+function Base.show(io::IO, aid::AgentID)
+  if aid.owner !== nothing
+    rsp = aid << ParameterReq()
+    if rsp !== nothing
+      println(io, rsp)
+      return
+    end
+  end
+  print(io, aid.istopic ? "#"*aid.name : aid.name)
+end
+
 JSON.lower(aid::AgentID) = aid.istopic ? "#"*aid.name : aid.name
 
 """
@@ -332,7 +342,18 @@ end
 Base.getindex(aid::AgentID, ndx::Int64) = _IndexedAgentID(aid, ndx)
 Base.getproperty(iaid::_IndexedAgentID, p::Symbol) = Base.getproperty(getfield(iaid, :aid), p, ndx=getfield(iaid, :ndx))
 Base.setproperty!(iaid::_IndexedAgentID, p::Symbol, v) = Base.setproperty!(getfield(iaid, :aid), p, v, ndx=getfield(iaid, :ndx))
-Base.show(io::IO, iaid::_IndexedAgentID) = print(io, "$(getfield(getfield(iaid, :aid), :name))[$(getfield(iaid, :ndx))]")
+
+function Base.show(io::IO, iaid::_IndexedAgentID)
+  aid = getfield(iaid, :aid)
+  if aid.owner !== nothing
+    rsp = aid << ParameterReq(index=getfield(iaid, :ndx))
+    if rsp !== nothing
+      println(io, rsp)
+      return
+    end
+  end
+  print(io, "$(getfield(getfield(iaid, :aid), :name))[$(getfield(iaid, :ndx))]")
+end
 
 # convenience methods and pretty printing for parameters
 
@@ -362,7 +383,36 @@ function org_arl_fjage_param_ParameterReq(vals...; index=-1)
   req
 end
 
+function Base.get(p::ParameterRsp, key)
+  skey = string(key)
+  dskey = "." * skey
+  (p.param == skey || endswith(p.param, dskey)) && return p.value
+  vals = p.values
+  if vals !== nothing
+    for (k, v) ∈ vals
+      (k == skey || endswith(k, dskey)) && return v
+    end
+  end
+  nothing
+end
+
+function Base.show(io::IO, p::ParameterReq)
+  print(io, "ParameterReq[")
+  p.index !== nothing && p.index ≥ 0 && print(io, "index=", p.index, ' ')
+  p.param !== nothing && print(io, p.param, '=', (p.value === nothing ? "?" : string(p.value)))
+  p.requests === nothing || print(io, " ...")
+  print(io, ']')
+end
+
 function Base.show(io::IO, p::ParameterRsp)
+  print(io, "ParameterRsp[")
+  p.index !== nothing && p.index ≥ 0 && print(io, "index=", p.index, ' ')
+  p.param !== nothing && print(io, p.param, '=', p.value)
+  p.values === nothing || print(io, " ...")
+  print(io, ']')
+end
+
+function Base.println(io::IO, p::ParameterRsp)
   plist = Pair{String,Any}[]
   if p.param !== nothing
     x = p.param
