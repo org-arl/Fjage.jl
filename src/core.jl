@@ -352,7 +352,12 @@ function org_arl_fjage_param_ParameterReq(vals...; index=-1)
     q = popfirst!(qlist)
     req.param = q[1]
     req.value = q[2]
-    length(qlist) > 0 && (req.requests = Dict(qlist))
+    if length(qlist) > 0
+      req.requests = Dict{String,Any}[]
+      for q ∈ qlist
+        push!(req.requests, Dict{String,Any}("param" => q[1], "value" => q[2]))
+      end
+    end
   end
   req
 end
