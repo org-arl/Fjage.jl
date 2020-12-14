@@ -110,11 +110,7 @@ topic(gw::Gateway, aid::AgentID, topic2::String) = AgentID(aid.name*"__"*topic2*
 function agentforservice(gw::Gateway, svc::String)
   rq = Dict("action" => "agentForService", "service" => svc)
   rsp = _ask(gw, rq)
-  if haskey(rsp, "agentID")
-    AgentID(rsp["agentID"], false, gw)
-  else
-    nothing
-  end
+  haskey(rsp, "agentID") ? AgentID(rsp["agentID"], false, gw) : nothing
 end
 
 "Find all agents that provides a named service."
@@ -245,20 +241,13 @@ it must take in a message and return `true` or `false`. A message for which it r
 `true` is retrieved.
 """
 function receive(gw::Gateway, timeout::Int=0)
-  if isready(gw.queue)
-    return take!(gw.queue)
-  end
-  if timeout == 0
-    return nothing
-  end
+  isready(gw.queue) && return take!(gw.queue)
+  timeout == 0 && return nothing
   waiting = true
   if timeout > 0
     @async begin
-      timer = Timer(timeout/1000.0)
-      wait(timer)
-      if waiting
-        push!(gw.queue, nothing)
-      end
+      sleep(timeout/1000.0)
+      waiting && push!(gw.queue, nothing)
     end
   end
   rv = take!(gw.queue)

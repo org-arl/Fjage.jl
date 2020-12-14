@@ -24,7 +24,7 @@ abstract type Message end
 struct AgentID
   name::String
   istopic::Bool
-  owner
+  owner::Any
 end
 
 """
@@ -78,15 +78,15 @@ ShellExecReq: REQUEST [cmd:"ps"]
 function MessageClass(context, clazz::String, superclass=nothing, performative=nothing)
   sname = replace(string(clazz), "." => "_")
   tname = sname
-  if performative == nothing
+  if performative === nothing
     performative = match(r"Req$",string(clazz))==nothing ? Performative.INFORM : Performative.REQUEST
   end
-  if superclass == nothing
+  if superclass === nothing
     superclass = "$(@__MODULE__).Message"
   else
     scname = string(superclass)
     ndx = findlast(isequal('.'), scname)
-    if ndx != nothing
+    if ndx !== nothing
       scname = scname[ndx+1:end]
     end
     if scname == tname
@@ -131,10 +131,8 @@ function AbstractMessageClass(context, clazz::String, performative=nothing)
 end
 
 function _messageclass_lookup(clazz::String)
-  if haskey(_messageclasses, clazz)
-    return _messageclasses[clazz]
-  end
-  return Message
+  haskey(_messageclasses, clazz) && return _messageclasses[clazz]
+  Message
 end
 
 """
@@ -145,9 +143,7 @@ must be an "owned" agentID obtained from the `agent(gw, name)` function or retur
 `agentforservice(gw, service)` function.
 """
 function send(aid::AgentID, msg::Message)
-  if aid.owner == nothing
-    error("cannot send message to an unowned agentID")
-  end
+  aid.owner === nothing && throw(ArgumentError("cannot send message to an unowned agentID"))
   msg.recipient = aid
   send(aid.owner, msg)
 end
@@ -175,7 +171,7 @@ and defaults to 1 second if unspecified.
 """
 function request(aid::AgentID, msg::Message, timeout::Int=1000)
   send(aid, msg)
-  return receive(aid.owner, msg, timeout)
+  receive(aid.owner, msg, timeout)
 end
 
 """
@@ -211,33 +207,29 @@ end
 
 # adds notation message.field
 function Base.setproperty!(s::Message, p::Symbol, v)
-  if p == :__clazz__ || p == :__data__
-    error("read-only property cannot be set")
-  else
-    p1 = string(p)
-    if p1 == "performative"
-      p1 = "perf"
-    elseif p1 == "messageID"
-      p1 = "msgID"
-    end
-    getfield(s, :data)[p1] = v
+  (p == :__clazz__ || p == :__data__) && throw(ArgumentError("read-only property cannot be set"))
+  p1 = string(p)
+  if p1 == "performative"
+    p1 = "perf"
+  elseif p1 == "messageID"
+    p1 = "msgID"
   end
+  getfield(s, :data)[p1] = v
+  nothing
 end
 
 # pretty prints arrays without type names
 function _repr(x)
   x = repr(x)
   m = match(r"[A-Za-z0-9]+(\[.+\])", x)
-  if m != nothing
-    x = m[1]
-  end
-  return x
+  m !== nothing && (x = m[1])
+  x
 end
 
 # pretty printing of messages
 function Base.show(io::IO, msg::Message)
   ndx = findlast(".", msg.__clazz__)
-  s = ndx == nothing ? msg.__clazz__ : msg.__clazz__[ndx[1]+1:end]
+  s = ndx === nothing ? msg.__clazz__ : msg.__clazz__[ndx[1]+1:end]
   p = ""
   data_suffix = ""
   signal_suffix = ""
@@ -267,24 +259,14 @@ function Base.show(io::IO, msg::Message)
       end
     end
   end
-  if length(suffix) > 0
-    p *= " " * suffix
-  end
-  if length(signal_suffix) > 0
-    p *= " " * signal_suffix
-  end
-  if length(data_suffix) > 0
-    p *= " " * data_suffix
-  end
+  length(suffix) > 0 && (p *= " " * suffix)
+  length(signal_suffix) > 0 && (p *= " " * signal_suffix)
+  length(data_suffix) > 0 && (p *= " " * data_suffix)
   p = strip(p)
-  if length(p) > 0
-    s *= " [$p]"
-  end
+  length(p) > 0 && (s *= " [$p]")
   if msg.__clazz__ == "org.arl.fjage.GenericMessage"
     m = match(r"^GenericMessage: (.*)$", s)
-    if m != nothing
-      s = m[1]
-    end
+    m === nothing || (s = m[1])
   end
   print(io, s)
 end
@@ -315,17 +297,11 @@ Message(inreplyto::Message, perf::String=Performative.INFORM) = GenericMessage(p
 # add notation AgentID.property
 
 function Base.getproperty(aid::AgentID, p::Symbol; ndx=-1)
-  if hasfield(AgentID, p)
-    return getfield(aid, p)
-  end
-  if getfield(aid, :owner) == nothing
-    return nothing
-  end
+  hasfield(AgentID, p) && return getfield(aid, p)
+  getfield(aid, :owner) === nothing && return nothing
   rsp = aid << ParameterReq(param=string(p), index=ndx)
-  if rsp == nothing
-    return nothing
-  end
-  return rsp.value
+  rsp === nothing && return nothing
+  rsp.value
 end
 
 function Base.setproperty!(aid::AgentID, p::Symbol, value; ndx=-1)
@@ -334,18 +310,17 @@ function Base.setproperty!(aid::AgentID, p::Symbol, value; ndx=-1)
     return
   end
   name = getfield(aid, :name)
-  if getfield(aid, :owner) == nothing
+  if getfield(aid, :owner) === nothing
     @warn "Unable to set $(name).$(p): unowned agent"
     return
   end
   rsp = aid << ParameterReq(param=string(p), value=value, index=ndx)
-  if rsp == nothing
+  if rsp === nothing
     @warn "Unable to set $(name).$(p): no response"
     return
   end
-  if rsp.value != value
-    @warn "$(name).$(p) set to $(rsp.value)"
-  end
+  rsp.value != value && @warn "$(name).$(p) set to $(rsp.value)"
+  nothing
 end
 
 struct _IndexedAgentID
