@@ -464,3 +464,111 @@ function stop(b::MessageBehavior)
   _listener_notify(b.agent)
   nothing
 end
+
+### parameters
+
+ParameterMessageBehavior() = MessageBehavior(nothing, ParameterReq, nothing, false, 0, nothing, _paramreq_action, nothing)
+
+function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
+  # resolve requests
+  ndx = something(msg.index, -1)
+  plist = ndx < 0 ? params(a) : params(a, ndx)
+  req = Tuple{String,Symbol,Any}[]
+  if msg.param !== nothing
+    rr = _resolve(plist, msg.param, ndx)
+    rr === nothing || push!(req, (rr[1], rr[2], msg.value))
+  end
+  let preqs = msg.requests
+    if preqs !== nothing
+      for r ∈ preqs
+        rr = _resolve(plist, r["param"], ndx)
+        rr === nothing || push!(req, (rr[1], rr[2], "value" ∈ keys(r) ? r["value"] : nothing))
+      end
+    end
+  end
+  if length(req) == 0
+    push!(req, ("title", :title, nothing))
+    push!(req, ("description", :description, nothing))
+    for kv ∈ plist
+      push!(req, (kv..., nothing))
+    end
+  end
+  # perform requests
+  rsp = Pair{String,Any}[]
+  ro = String[]
+  for (q, p, v) ∈ req
+    try
+      if v === nothing   # get
+        if ndx < 0
+          if hasmethod(get, Tuple{typeof(a),Val{p}})
+            x = get(a, Val(p))
+            if x !== missing && x !== nothing
+              push!(rsp, q => x)
+              hasmethod(set, Tuple{typeof(a),Val{p}}) || push!(ro, q)
+            end
+          elseif hasfield(typeof(a), p)
+            x = getfield(a, p)
+            x === missing || x === nothing || push!(rsp, q => x)
+          end
+        else
+          if hasmethod(get, Tuple{typeof(a),Val{p},Int})
+            x = get(a, Val(p), ndx)
+            if x !== missing && x !== nothing
+              push!(rsp, q => x)
+              hasmethod(set, Tuple{typeof(a),Val{p},Int}) || push!(ro, q)
+            end
+          end
+        end
+      else # set
+        if ndx < 0
+          if hasmethod(set, Tuple{typeof(a),Val{p},typeof(v)})
+            x = set(a, Val(p), v)
+            if x === missing || x === nothing
+              if hasmethod(get, Tuple{typeof(a),Val{p}})
+                x = get(a, Val(p))
+              elseif hasfield(typeof(a), p)
+                x = getfield(a, p)
+              end
+            end
+            x === missing || x === nothing || push!(rsp, q => x)
+          elseif hasfield(typeof(a), p)
+            x = setfield!(a, p)
+            push!(rsp, q => x)
+          end
+        else
+          if hasmethod(set, Tuple{typeof(a),Val{p},Int,typeof(v)})
+            x = set(a, Val(p), ndx, v)
+            if x === missing || x === nothing
+              hasmethod(get, Tuple{typeof(a),Val{p},Int}) && (x = get(a, Val(p), ndx))
+            end
+            x === missing || x === nothing || push!(rsp, q => x)
+          end
+        end
+      end
+    catch ex
+      @warn "Error during ParameterReq: $(ex)"
+    end
+  end
+  rmsg = ParameterRsp(perf=Performative.INFORM, inReplyTo=msg.messageID, recipient=msg.sender, readonly=ro, index=ndx)
+  length(rsp) > 0 && ((rmsg.param, rmsg.value) = popfirst!(rsp))
+  length(rsp) > 0 && (rmsg.values = Dict(rsp))
+  send(a, rmsg)
+end
+
+function _resolve(plist, p, ndx)
+  psym = Symbol(p)
+  for kv ∈ plist
+    kv[1] == p && return kv
+    kv[2] === psym && return kv
+  end
+  nothing
+end
+
+params(a::Agent) = Pair{String,Symbol}[]
+params(a::Agent, ndx) = Pair{String,Symbol}[]
+
+get(a::Agent, ::Val{:type}) = string(typeof(a))
+get(a::Agent, ::Val{:title}) = string(AgentID(a))
+get(a::Agent, ::Val{:description}) = ""
+
+function set end

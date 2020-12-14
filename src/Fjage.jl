@@ -34,9 +34,9 @@ export agent, topic, send, receive, request, agentforservice, agentsforservice, 
 
 export RealTimePlatform, currenttimemillis, nanotime, delay, containers, isrunning, add, start, shutdown
 export Container, containsagent, canlocate, agent, platform, ps
-export Agent, @agent, init, container
+export Agent, @agent, container
 export Behavior, done, priority, block, restart, stop
-export OneShotBehavior, CyclicBehavior, WakerBehavior, TickerBehavior, MessageBehavior
+export OneShotBehavior, CyclicBehavior, WakerBehavior, TickerBehavior, MessageBehavior, ParameterMessageBehavior
 
 const MAX_QUEUE_LEN = 256
 const BLOCKING = -1
