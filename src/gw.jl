@@ -48,12 +48,22 @@ function _ask(gw, rq::Dict)
   end
 end
 
+_agents(gw::Gateway) = [gw.agentID.name]
+_subscriptions(gw::Gateway) = gw.subscriptions
+_services(gw::Gateway) = String[]
+_agentsforservice(gw::Gateway) = String[]
+
+function _deliver(gw::Gateway, msg)
+  while length(gw.queue.data) >= MAX_QUEUE_LEN
+    take!(gw.queue)
+  end
+  put!(gw.queue, msg)
+end
+
 # update master container about changes to recipient watch list
 function _update_watch(gw)
-  watch = [gw.agentID.name]
-  for s in gw.subscriptions
-    push!(watch, s)
-  end
+  watch = _agents(gw)
+  append!(watch, _subscriptions(gw))
   s = JSON.json(Dict(
     "action" => "wantsMessagesFor",
     "agentIDs" => watch
@@ -72,25 +82,28 @@ function _run(gw)
       put!(gw.pending[json["id"]], json)
     elseif haskey(json, "action")
       if json["action"] == "agents"
-        _respond(gw, json, Dict("agentIDs" => [gw.agentID.name]))
+        _respond(gw, json, Dict("agentIDs" => _agents(gw)))
       elseif json["action"] == "agentForService"
-        _respond(gw, json, Dict())
+        alist = _agentsforservice(gw)
+        if length(alist) > 0
+          _respond(gw, json, Dict("agentID" => first(alist)))
+        else
+          _respond(gw, json, Dict())
+        end
       elseif json["action"] == "agentsForService"
-        _respond(gw, json, Dict("agentIDs" => []))
+        alist = _agentsforservice(gw)
+        _respond(gw, json, Dict("agentIDs" => alist))
       elseif json["action"] == "services"
-        _respond(gw, json, Dict("services" => []))
+        _respond(gw, json, Dict("services" => _services(gw)))
       elseif json["action"] == "containsAgent"
-        ans = (json["agentID"] == gw.agentID.name)
+        ans = (json["agentID"] ∈ _agents(gw))
         _respond(gw, json, Dict("answer" => ans))
       elseif json["action"] == "send"
         rcpt = json["message"]["data"]["recipient"]
-        if rcpt == gw.agentID.name || rcpt ∈ gw.subscriptions
+        if rcpt ∈ _agents(gw) || rcpt ∈ _subscriptions(gw)
           try
             msg = _inflate(json["message"])
-            while length(gw.queue.data) >= MAX_QUEUE_LEN
-              take!(gw.queue)
-            end
-            put!(gw.queue, msg)
+            _deliver(gw, msg)
           catch ex
             @warn ex
           end
@@ -145,7 +158,7 @@ function close(gw::Gateway)
 end
 
 # prepares a message to be sent to the server
-function _prepare!(gw::Gateway, msg::Message)
+function _prepare!(gw, msg::Message)
   msg.sender = gw.agentID
   for k in keys(msg.__data__)
     v = msg.__data__[k]
