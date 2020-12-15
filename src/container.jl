@@ -50,11 +50,12 @@ struct StandaloneContainer{T <: Platform} <: Container
   platform::T
   agents::Dict{String,Agent}
   topics::Dict{AgentID,Set{Agent}}
+  services::Dict{String,Set{AgentID}}
   running::Ref{Bool}
 end
 
 function Container(p)
-  c = StandaloneContainer(p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(), Ref(false))
+  c = StandaloneContainer(p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(), Dict{String,Set{AgentID}}(), Ref(false))
   add(p, c)
   c
 end
@@ -94,6 +95,7 @@ function kill(c::StandaloneContainer, name::String)
   a._aid = nothing
   empty!(a._behaviors)
   foreach(kv -> delete!(kv[2], a), c.topics)
+  foreach(kv -> delete!(kv[2], AgentID(name)), c.services)
   delete!(c.agents, name)
   @debug "Killed agent $(name)"
   true
@@ -118,6 +120,8 @@ function shutdown(c::StandaloneContainer)
   @debug "Stopping StandaloneContainer..."
   foreach(name -> kill(c, name), keys(c.agents))
   empty!(c.agents)
+  empty!(c.topics)
+  empty!(c.services)
   c.running[] = false
   @debug "Stopped StandaloneContainer"
   nothing
@@ -126,7 +130,7 @@ end
 ps(c::StandaloneContainer) = collect((kv[1], typeof(kv[2])) for kv ∈ c.agents)
 
 function subscribe(c::StandaloneContainer, t::AgentID, a::Agent)
-  t ∈ keys(c.topics) || (c.topics[t] = Agent[])
+  t ∈ keys(c.topics) || (c.topics[t] = Set{Agent}())
   push!(c.topics[t], a)
   nothing
 end
@@ -135,6 +139,28 @@ function unsubscribe(c::StandaloneContainer, t::AgentID, a::Agent)
   t ∈ keys(c.topics) || return
   delete!(c.topics[t], a)
   nothing
+end
+
+function register(c::StandaloneContainer, svc::String, a::AgentID)
+  svc ∈ keys(c.services) || (c.services[svc] = Set{AgentID}())
+  push!(c.services[svc], a)
+  nothing
+end
+
+function deregister(c::StandaloneContainer, svc::String, a::AgentID)
+  svc ∈ keys(c.services) || return
+  delete!(c.services[svc], a)
+  nothing
+end
+
+function agentforservice(c::StandaloneContainer, svc::String)
+  svc ∈ keys(c.services) || return nothing
+  first(c.services[svc])
+end
+
+function agentsforservice(c::StandaloneContainer, svc::String)
+  svc ∈ keys(c.services) || return AgentID[]
+  collect(c.services[svc])
 end
 
 function _deliver(c::StandaloneContainer, msg::Message)
@@ -165,11 +191,34 @@ end
 Base.show(io::IO, a::Agent) = print(io, typeof(a), "(", something(AgentID(a), "-"), ")")
 
 function init(a::Agent)
-  @debug "Agent $(AgentID(a)) initialized"
+  @debug "Agent $(AgentID(a)) init"
+  setup(a)
+  add(a, OneShotBehavior((a, b) -> startup(a)))
+  add(a, ParameterMessageBehavior())
+  add(a, MessageBehavior() do a, b, msg
+    if msg.performative == Performative.REQUEST
+      rsp = processrequest(a, msg)
+      rsp === nothing || send(a, rsp)
+    else
+      processmessage(a, msg)
+    end
+  end)
 end
+
+setup(a::Agent) = nothing
+startup(a::Agent) = nothing
+processrequest(a::Agent, req::Message) = nothing
+processmessage(a::Agent, msg::Message) = nothing
 
 function shutdown(a::Agent)
   @debug "Agent $(AgentID(a)) terminated"
+end
+
+stop(a::Agent) = kill(container(a), a)
+
+function die(a::Agent, msg)
+  @error msg
+  stop(a)
 end
 
 platform(a::Agent) = platform(container(a))
@@ -182,6 +231,11 @@ delay(a::Agent, millis) = delay(platform(a), millis)
 
 subscribe(a::Agent, t::AgentID) = subscribe(container(a), t, a)
 unsubscribe(a::Agent, t::AgentID) = unsubscribe(container(a), t, a)
+
+register(a::Agent, svc::String) = register(container(a), svc, AgentID(a))
+deregister(a::Agent, svc::String) = deregister(container(a), svc, AgentID(a))
+agentforservice(a::Agent, svc::String) = agentforservice(container(a), svc)
+agentsforservice(a::Agent, svc::String) = agentsforservice(container(a), svc)
 
 function send(a::Agent, msg::Message)
   @debug "sending $(msg)"

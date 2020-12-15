@@ -33,8 +33,8 @@ export Performative, AgentID, Gateway, Message, GenericMessage, MessageClass, Ab
 export agent, topic, send, receive, request, agentforservice, agentsforservice, subscribe, unsubscribe, BLOCKING
 
 export RealTimePlatform, currenttimemillis, nanotime, delay, containers, isrunning, add, start, shutdown
-export Container, containsagent, canlocate, agent, platform, ps
-export Agent, @agent, container
+export Container, containsagent, canlocate, agent, platform, ps, register, deregister
+export Agent, @agent, container, Services
 export Behavior, done, priority, block, restart, stop
 export OneShotBehavior, CyclicBehavior, WakerBehavior, TickerBehavior, MessageBehavior, ParameterMessageBehavior
 

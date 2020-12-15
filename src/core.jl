@@ -17,6 +17,11 @@ module Performative
   const CANCEL = "CANCEL"
 end
 
+"Services"
+module Services
+  const SHELL = "org.arl.fjage.shell.Services.SHELL"
+end
+
 "Base class for messages transmitted by one agent to another."
 abstract type Message end
 
