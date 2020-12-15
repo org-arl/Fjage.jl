@@ -150,8 +150,8 @@ try
     end
 
     @testset "unsubscribe" begin
-      flush(gw)
       unsubscribe(gw, ntf)
+      flush(gw)
       send(ntf, ShellExecReq(cmd="ps"))
       msg = receive(gw, 1000)
       @test msg == nothing

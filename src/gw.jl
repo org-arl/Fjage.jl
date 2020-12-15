@@ -8,14 +8,14 @@ See also: [`Fjage`](@ref)
 struct Gateway
   agentID::AgentID
   sock::TCPSocket
-  subscriptions::Dict{String,Bool}
+  subscriptions::Set{String}
   pending::Dict{String,Channel}
   queue::Channel
   function Gateway(name::String, host::String, port::Int)
     gw = new(
       AgentID(name, false),
       connect(host, port),
-      Dict{String,Bool}(),
+      Set{String}(),
       Dict{String,Channel}(),
       Channel(MAX_QUEUE_LEN)
     )
@@ -51,7 +51,7 @@ end
 # update master container about changes to recipient watch list
 function _update_watch(gw)
   watch = [gw.agentID.name]
-  for s in keys(gw.subscriptions)
+  for s in gw.subscriptions
     push!(watch, s)
   end
   s = JSON.json(Dict(
@@ -84,7 +84,7 @@ function _run(gw)
         _respond(gw, json, Dict("answer" => ans))
       elseif json["action"] == "send"
         rcpt = json["message"]["data"]["recipient"]
-        if rcpt == gw.agentID.name || get(gw.subscriptions, rcpt, false)
+        if rcpt == gw.agentID.name || rcpt ∈ gw.subscriptions
           try
             msg = _inflate(json["message"])
             while length(gw.queue.data) >= MAX_QUEUE_LEN
@@ -92,7 +92,7 @@ function _run(gw)
             end
             put!(gw.queue, msg)
           catch ex
-            # silently ignore bad messages
+            @warn ex
           end
         end
       end
@@ -122,7 +122,7 @@ end
 
 "Subscribe to receive all messages sent to the given topic."
 function subscribe(gw::Gateway, aid::AgentID)
-  gw.subscriptions[string(topic(gw, aid))] = true
+  push!(gw.subscriptions, string(topic(gw, aid)))
   _update_watch(gw)
   true
 end
@@ -130,7 +130,7 @@ end
 "Unsubscribe from receiving messages sent to the given topic."
 function unsubscribe(gw::Gateway, aid::AgentID)
   k = string(topic(gw, aid))
-  if haskey(gw.subscriptions, k)
+  if k ∈ gw.subscriptions
     delete!(gw.subscriptions, k)
     _update_watch(gw)
     return true
