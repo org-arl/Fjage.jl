@@ -7,14 +7,14 @@ See also: [`Fjage`](@ref)
 """
 struct Gateway
   agentID::AgentID
-  sock::TCPSocket
+  sock::Ref{TCPSocket}
   subscriptions::Set{String}
   pending::Dict{String,Channel}
   queue::Channel
   function Gateway(name::String, host::String, port::Int)
     gw = new(
       AgentID(name, false),
-      connect(host, port),
+      Ref(connect(host, port)),
       Set{String}(),
       Dict{String,Channel}(),
       Channel(MAX_QUEUE_LEN)
@@ -31,7 +31,7 @@ Base.show(io::IO, gw::Gateway) = print(io, gw.agentID.name)
 # respond to master container
 function _respond(gw, rq::Dict, rsp::Dict)
   s = JSON.json(merge(Dict("id" => rq["id"], "inResponseTo" => rq["action"]), rsp))
-  println(gw.sock, s)
+  println(gw.sock[], s)
 end
 
 # ask master container a question, and wait for reply
@@ -41,7 +41,7 @@ function _ask(gw, rq::Dict)
   ch = Channel{Dict}(1)
   gw.pending[id] = ch
   try
-    println(gw.sock, s)
+    println(gw.sock[], s)
     return take!(ch)
   finally
     delete!(gw.pending, id)
@@ -68,15 +68,15 @@ function _update_watch(gw)
     "action" => "wantsMessagesFor",
     "agentIDs" => watch
   ))
-  println(gw.sock, s)
+  println(gw.sock[], s)
 end
 
 # task monitoring incoming JSON messages from master container
 function _run(gw)
-  println(gw.sock, "{\"alive\": true}")
+  println(gw.sock[], "{\"alive\": true}")
   _update_watch(gw)
-  while isopen(gw.sock)
-    s = readline(gw.sock)
+  while isopen(gw.sock[])
+    s = readline(gw.sock[])
     json = JSON.parse(s)
     if haskey(json, "id") && haskey(gw.pending, json["id"])
       put!(gw.pending[json["id"]], json)
@@ -110,7 +110,7 @@ function _run(gw)
         end
       end
     elseif haskey(json, "alive") && json["alive"]
-      println(gw.sock, "{\"alive\": true}")
+      println(gw.sock[], "{\"alive\": true}")
     end
   end
 end
@@ -153,13 +153,12 @@ end
 
 "Close a gateway connection to the master container."
 function close(gw::Gateway)
-  println(gw.sock, "{\"alive\": false}")
-  Base.close(gw.sock)
+  println(gw.sock[], "{\"alive\": false}")
+  Base.close(gw.sock[])
 end
 
 # prepares a message to be sent to the server
-function _prepare!(gw, msg::Message)
-  msg.sender = gw.agentID
+function _prepare!(msg::Message)
   for k in keys(msg.__data__)
     v = msg.__data__[k]
     if typeof(v) <: Array && typeof(v).parameters[1] <: Complex
@@ -234,9 +233,10 @@ Send a message via the gateway to the specified agent. The `recipient` field of 
 populated with an agentID.
 """
 function send(gw::Gateway, msg::Message)
-  _prepare!(gw, msg)
+  msg.sender = gw.agentID
+  _prepare!(msg)
   json = JSON.json(Dict("action" => "send", "relay" => true, "message" => msg))
-  println(gw.sock, json)
+  println(gw.sock[], json)
 end
 
 """

@@ -60,19 +60,20 @@ function Container(p)
   c
 end
 
-Base.show(io::IO, c::StandaloneContainer) = print(io, "StandaloneContainer[running=", c.running[], ", platform=", typeof(c.platform), ", agents=", length(c.agents), "]")
+Base.show(io::IO, c::Container) = print(io, typeof(c), "[running=", c.running[], ", platform=", typeof(c.platform), ", agents=", length(c.agents), "]")
 
-platform(c::StandaloneContainer) = c.platform
-isrunning(c::StandaloneContainer) = c.running[]
+platform(c::Container) = c.platform
+isrunning(c::Container) = c.running[]
 
-containsagent(c::StandaloneContainer, aid::AgentID) = aid.name ∈ keys(c.agents)
-containsagent(c::StandaloneContainer, name::String) = name ∈ keys(c.agents)
+containsagent(c::Container, aid::AgentID) = aid.name ∈ keys(c.agents)
+containsagent(c::Container, name::String) = name ∈ keys(c.agents)
+
 canlocate(c::StandaloneContainer, a) = containsagent(c, a)
 
-agent(c::StandaloneContainer, name::String) = c.agents[name]
-agent(c::StandaloneContainer, aid::AgentID) = agent(c, aid.name)
+agent(c::Container, name::String) = c.agents[name]
+agent(c::Container, aid::AgentID) = agent(c, aid.name)
 
-function add(c::StandaloneContainer, name::String, a::Agent)
+function add(c::Container, name::String, a::Agent)
   canlocate(c, name) && throw(ArgumentError("Duplicate agent name"))
   a._container = c
   a._aid = AgentID(name)
@@ -82,9 +83,9 @@ function add(c::StandaloneContainer, name::String, a::Agent)
   nothing
 end
 
-add(c::StandaloneContainer, a::Agent) = add(c, string(typeof(a)) * "-" * string(uuid4())[1:8], a)
+add(c::Container, a::Agent) = add(c, string(typeof(a)) * "-" * string(uuid4())[1:8], a)
 
-function kill(c::StandaloneContainer, name::String)
+function kill(c::Container, name::String)
   containsagent(c, name) || return false
   a = c.agents[name]
   if c.running[]
@@ -101,10 +102,10 @@ function kill(c::StandaloneContainer, name::String)
   true
 end
 
-kill(c::StandaloneContainer, aid::AgentID) = kill(c, aid.name)
-kill(c::StandaloneContainer, a::Agent) = kill(c, AgentID(a))
+kill(c::Container, aid::AgentID) = kill(c, aid.name)
+kill(c::Container, a::Agent) = kill(c, AgentID(a))
 
-Base.kill(c::StandaloneContainer, a) = kill(c, a)
+Base.kill(c::Container, a) = kill(c, a)
 
 function start(c::StandaloneContainer)
   c.running[] && return
@@ -141,13 +142,13 @@ function unsubscribe(c::StandaloneContainer, t::AgentID, a::Agent)
   nothing
 end
 
-function register(c::StandaloneContainer, svc::String, a::AgentID)
+function register(c::Container, svc::String, a::AgentID)
   svc ∈ keys(c.services) || (c.services[svc] = Set{AgentID}())
   push!(c.services[svc], a)
   nothing
 end
 
-function deregister(c::StandaloneContainer, svc::String, a::AgentID)
+function deregister(c::Container, svc::String, a::AgentID)
   svc ∈ keys(c.services) || return
   delete!(c.services[svc], a)
   nothing
@@ -163,7 +164,7 @@ function agentsforservice(c::StandaloneContainer, svc::String)
   collect(c.services[svc])
 end
 
-function _deliver(c::StandaloneContainer, msg::Message)
+function _deliver(c::StandaloneContainer, msg)
   c.running[] || return
   if msg.recipient.name ∈ keys(c.agents)
     _deliver(c.agents[msg.recipient.name], msg)
@@ -175,6 +176,111 @@ function _deliver(c::StandaloneContainer, msg::Message)
 end
 
 _deliver(::Nothing, msg::Message) = @debug "Delivered message $(msg) to nowhere"
+
+### slave container
+
+struct SlaveContainer{T <: Platform} <: Container
+  platform::T
+  agents::Dict{String,Agent}
+  topics::Dict{AgentID,Set{Agent}}
+  services::Dict{String,Set{AgentID}}
+  running::Ref{Bool}
+  sock::Ref{Union{TCPSocket,Nothing}}
+  pending::Dict{String,Channel}
+  host::String
+  port::Int
+end
+
+function SlaveContainer(p, host, port)
+  c = SlaveContainer(p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(), Dict{String,Set{AgentID}}(), Ref(false), Ref(nothing), Dict{String,Channel}(), host, port)
+  add(p, c)
+  c
+end
+
+function canlocate(c::SlaveContainer, a)
+  containsagent(c, a) && return true
+  # TODO
+  false
+end
+
+function start(c::SlaveContainer)
+  c.running[] && return
+  @debug "Starting SlaveContainer..."
+  c.running[] = true
+  foreach(kv -> init(kv[2]), c.agents)
+  @debug "SlaveContainer is running"
+  @debug "SlaveContainer connecting to $(c.host):$(c.port)..."
+  c.sock[] = connect(c.host, c.port)   # TODO: deal with errors
+  @async _run(c)
+  @debug "SlaveContainer connected"
+  nothing
+end
+
+function shutdown(c::SlaveContainer)
+  c.running[] || return
+  @debug "Stopping SlaveContainer..."
+  foreach(name -> kill(c, name), keys(c.agents))
+  empty!(c.agents)
+  empty!(c.topics)
+  empty!(c.services)
+  c.running[] = false
+  println(c.sock[], "{\"alive\": false}")
+  Base.close(c.sock[])
+  c.sock[] = nothing
+  @debug "Stopped SlaveContainer"
+  nothing
+end
+
+function ps(c::SlaveContainer)
+  alist = collect((kv[1], typeof(kv[2])) for kv ∈ c.agents)
+  # TODO
+end
+
+function subscribe(c::SlaveContainer, t::AgentID, a::Agent)
+  t ∈ keys(c.topics) || (c.topics[t] = Set{Agent}())
+  push!(c.topics[t], a)
+  _update_watch(gw)
+  nothing
+end
+
+function unsubscribe(c::SlaveContainer, t::AgentID, a::Agent)
+  t ∈ keys(c.topics) || return
+  delete!(c.topics[t], a)
+  _update_watch(gw)
+  nothing
+end
+
+function agentforservice(c::SlaveContainer, svc::String)
+  rq = Dict("action" => "agentForService", "service" => svc)
+  rsp = _ask(c, rq)
+  haskey(rsp, "agentID") ? AgentID(rsp["agentID"], false, c) : nothing
+end
+
+function agentsforservice(c::SlaveContainer, svc::String)
+  rq = Dict("action" => "agentsForService", "service" => svc)
+  rsp = _ask(c, rq)
+  [AgentID(a, false, c) for a in rsp["agentIDs"]]
+end
+
+_agents(c::SlaveContainer) =
+_subscriptions(c::SlaveContainer) =
+_services(c::SlaveContainer) =
+
+function _agentsforservice(c::SlaveContainer, svc::String)
+  svc ∈ keys(c.services) || return AgentID[]
+  collect(c.services[svc])
+end
+
+function _deliver(c::SlaveContainer, msg)
+  c.running[] || return
+  if msg.recipient.name ∈ keys(c.agents)
+    _deliver(c.agents[msg.recipient.name], msg)
+  else
+    _prepare!(msg)
+    json = JSON.json(Dict("action" => "send", "relay" => true, "message" => msg))
+    println(c.sock[], json)
+  end
+end
 
 ### agent
 
