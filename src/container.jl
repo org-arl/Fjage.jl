@@ -154,14 +154,14 @@ function deregister(c::Container, svc::String, a::AgentID)
   nothing
 end
 
-function agentforservice(c::StandaloneContainer, svc::String)
+function agentforservice(c::StandaloneContainer, svc::String, owner::AgentID)
   svc ∈ keys(c.services) || return nothing
-  first(c.services[svc])
+  AgentID(first(c.services[svc]).name, false, owner)
 end
 
-function agentsforservice(c::StandaloneContainer, svc::String)
+function agentsforservice(c::StandaloneContainer, svc::String, owner::AgentID)
   svc ∈ keys(c.services) || return AgentID[]
-  collect(c.services[svc])
+  [AgentID(s.name, false, owner) for s ∈ c.services[svc]]
 end
 
 function _deliver(c::StandaloneContainer, msg)
@@ -185,14 +185,14 @@ struct SlaveContainer{T <: Platform} <: Container
   topics::Dict{AgentID,Set{Agent}}
   services::Dict{String,Set{AgentID}}
   running::Ref{Bool}
-  sock::Ref{Union{TCPSocket,Nothing}}
+  sock::Ref{TCPSocket}
   pending::Dict{String,Channel}
   host::String
   port::Int
 end
 
 function SlaveContainer(p, host, port)
-  c = SlaveContainer(p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(), Dict{String,Set{AgentID}}(), Ref(false), Ref(nothing), Dict{String,Channel}(), host, port)
+  c = SlaveContainer(p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(), Dict{String,Set{AgentID}}(), Ref(false), Ref(TCPSocket()), Dict{String,Channel}(), host, port)
   add(p, c)
   c
 end
@@ -226,7 +226,6 @@ function shutdown(c::SlaveContainer)
   c.running[] = false
   println(c.sock[], "{\"alive\": false}")
   Base.close(c.sock[])
-  c.sock[] = nothing
   @debug "Stopped SlaveContainer"
   nothing
 end
@@ -250,21 +249,21 @@ function unsubscribe(c::SlaveContainer, t::AgentID, a::Agent)
   nothing
 end
 
-function agentforservice(c::SlaveContainer, svc::String)
+function agentforservice(c::SlaveContainer, svc::String, owner::Agent)
   rq = Dict("action" => "agentForService", "service" => svc)
   rsp = _ask(c, rq)
-  haskey(rsp, "agentID") ? AgentID(rsp["agentID"], false, c) : nothing
+  haskey(rsp, "agentID") ? AgentID(rsp["agentID"], false, owner) : nothing
 end
 
-function agentsforservice(c::SlaveContainer, svc::String)
+function agentsforservice(c::SlaveContainer, svc::String, owner::Agent)
   rq = Dict("action" => "agentsForService", "service" => svc)
   rsp = _ask(c, rq)
-  [AgentID(a, false, c) for a in rsp["agentIDs"]]
+  [AgentID(a, false, owner) for a in rsp["agentIDs"]]
 end
 
-_agents(c::SlaveContainer) =
-_subscriptions(c::SlaveContainer) =
-_services(c::SlaveContainer) =
+_agents(c::SlaveContainer) = collect(keys(c.agents))
+_subscriptions(c::SlaveContainer) = collect(string.(keys(c.topics)))
+_services(c::SlaveContainer) = collect(keys(c.services))
 
 function _agentsforservice(c::SlaveContainer, svc::String)
   svc ∈ keys(c.services) || return AgentID[]
@@ -304,7 +303,11 @@ function init(a::Agent)
   add(a, MessageBehavior() do a, b, msg
     if msg.performative == Performative.REQUEST
       rsp = processrequest(a, msg)
-      rsp === nothing || send(a, rsp)
+      if rsp === nothing
+        send(a, Message(msg, Performative.NOT_UNDERSTOOD))
+      else
+        send(a, rsp)
+      end
     else
       processmessage(a, msg)
     end
@@ -313,8 +316,8 @@ end
 
 setup(a::Agent) = nothing
 startup(a::Agent) = nothing
-processrequest(a::Agent, req::Message) = nothing
-processmessage(a::Agent, msg::Message) = nothing
+processrequest(a::Agent, req) = nothing
+processmessage(a::Agent, msg) = nothing
 
 function shutdown(a::Agent)
   @debug "Agent $(AgentID(a)) terminated"
@@ -340,8 +343,8 @@ unsubscribe(a::Agent, t::AgentID) = unsubscribe(container(a), t, a)
 
 register(a::Agent, svc::String) = register(container(a), svc, AgentID(a))
 deregister(a::Agent, svc::String) = deregister(container(a), svc, AgentID(a))
-agentforservice(a::Agent, svc::String) = agentforservice(container(a), svc)
-agentsforservice(a::Agent, svc::String) = agentsforservice(container(a), svc)
+agentforservice(a::Agent, svc::String) = agentforservice(container(a), svc, a)
+agentsforservice(a::Agent, svc::String) = agentsforservice(container(a), svc, a)
 
 function send(a::Agent, msg::Message)
   @debug "sending $(msg)"
@@ -627,7 +630,7 @@ end
 
 ### parameters
 
-ParameterMessageBehavior() = MessageBehavior(nothing, ParameterReq, nothing, false, 0, nothing, _paramreq_action, nothing)
+ParameterMessageBehavior() = MessageBehavior(nothing, ParameterReq, nothing, false, -100, nothing, _paramreq_action, nothing)
 
 function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
   # resolve requests

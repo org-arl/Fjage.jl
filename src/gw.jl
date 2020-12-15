@@ -51,7 +51,7 @@ end
 _agents(gw::Gateway) = [gw.agentID.name]
 _subscriptions(gw::Gateway) = gw.subscriptions
 _services(gw::Gateway) = String[]
-_agentsforservice(gw::Gateway) = String[]
+_agentsforservice(gw::Gateway, svc) = String[]
 
 function _deliver(gw::Gateway, msg)
   while length(gw.queue.data) >= MAX_QUEUE_LEN
@@ -73,45 +73,49 @@ end
 
 # task monitoring incoming JSON messages from master container
 function _run(gw)
-  println(gw.sock[], "{\"alive\": true}")
-  _update_watch(gw)
-  while isopen(gw.sock[])
-    s = readline(gw.sock[])
-    json = JSON.parse(s)
-    if haskey(json, "id") && haskey(gw.pending, json["id"])
-      put!(gw.pending[json["id"]], json)
-    elseif haskey(json, "action")
-      if json["action"] == "agents"
-        _respond(gw, json, Dict("agentIDs" => _agents(gw)))
-      elseif json["action"] == "agentForService"
-        alist = _agentsforservice(gw)
-        if length(alist) > 0
-          _respond(gw, json, Dict("agentID" => first(alist)))
-        else
-          _respond(gw, json, Dict())
-        end
-      elseif json["action"] == "agentsForService"
-        alist = _agentsforservice(gw)
-        _respond(gw, json, Dict("agentIDs" => alist))
-      elseif json["action"] == "services"
-        _respond(gw, json, Dict("services" => _services(gw)))
-      elseif json["action"] == "containsAgent"
-        ans = (json["agentID"] ∈ _agents(gw))
-        _respond(gw, json, Dict("answer" => ans))
-      elseif json["action"] == "send"
-        rcpt = json["message"]["data"]["recipient"]
-        if rcpt ∈ _agents(gw) || rcpt ∈ _subscriptions(gw)
-          try
-            msg = _inflate(json["message"])
-            _deliver(gw, msg)
-          catch ex
-            @warn ex
+  try
+    println(gw.sock[], "{\"alive\": true}")
+    _update_watch(gw)
+    while isopen(gw.sock[])
+      s = readline(gw.sock[])
+      json = JSON.parse(s)
+      if haskey(json, "id") && haskey(gw.pending, json["id"])
+        put!(gw.pending[json["id"]], json)
+      elseif haskey(json, "action")
+        if json["action"] == "agents"
+          _respond(gw, json, Dict("agentIDs" => _agents(gw)))
+        elseif json["action"] == "agentForService"
+          alist = _agentsforservice(gw, json["service"])
+          if length(alist) > 0
+            _respond(gw, json, Dict("agentID" => first(alist)))
+          else
+            _respond(gw, json, Dict())
+          end
+        elseif json["action"] == "agentsForService"
+          alist = _agentsforservice(gw, json["service"])
+          _respond(gw, json, Dict("agentIDs" => alist))
+        elseif json["action"] == "services"
+          _respond(gw, json, Dict("services" => _services(gw)))
+        elseif json["action"] == "containsAgent"
+          ans = (json["agentID"] ∈ _agents(gw))
+          _respond(gw, json, Dict("answer" => ans))
+        elseif json["action"] == "send"
+          rcpt = json["message"]["data"]["recipient"]
+          if rcpt ∈ _agents(gw) || rcpt ∈ _subscriptions(gw)
+            try
+              msg = _inflate(json["message"])
+              _deliver(gw, msg)
+            catch ex
+              @warn ex
+            end
           end
         end
+      elseif haskey(json, "alive") && json["alive"]
+        println(gw.sock[], "{\"alive\": true}")
       end
-    elseif haskey(json, "alive") && json["alive"]
-      println(gw.sock[], "{\"alive\": true}")
     end
+  catch ex
+    @warn ex
   end
 end
 
