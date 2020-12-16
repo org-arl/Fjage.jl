@@ -60,6 +60,8 @@ function Container(p)
   c
 end
 
+Container() = Container(RealTimePlatform())
+
 Base.show(io::IO, c::Container) = print(io, typeof(c), "[running=", c.running[], ", platform=", typeof(c.platform), ", agents=", length(c.agents), "]")
 
 platform(c::Container) = c.platform
@@ -164,7 +166,7 @@ function agentsforservice(c::StandaloneContainer, svc::String, owner::AgentID)
   [AgentID(s.name, false, owner) for s ∈ c.services[svc]]
 end
 
-function _deliver(c::StandaloneContainer, msg)
+function _deliver(c::StandaloneContainer, msg::Message)
   c.running[] || return
   if msg.recipient.name ∈ keys(c.agents)
     _deliver(c.agents[msg.recipient.name], msg)
@@ -196,6 +198,8 @@ function SlaveContainer(p, host, port)
   add(p, c)
   c
 end
+
+SlaveContainer(host, port) = SlaveContainer(RealTimePlatform(), host, port)
 
 function canlocate(c::SlaveContainer, a)
   containsagent(c, a) && return true
@@ -236,16 +240,18 @@ function ps(c::SlaveContainer)
 end
 
 function subscribe(c::SlaveContainer, t::AgentID, a::Agent)
+  t.istopic || (t = topic(t))
   t ∈ keys(c.topics) || (c.topics[t] = Set{Agent}())
   push!(c.topics[t], a)
-  _update_watch(gw)
+  _update_watch(c)
   nothing
 end
 
 function unsubscribe(c::SlaveContainer, t::AgentID, a::Agent)
+  t.istopic || (t = topic(t))
   t ∈ keys(c.topics) || return
   delete!(c.topics[t], a)
-  _update_watch(gw)
+  _update_watch(c)
   nothing
 end
 
@@ -270,16 +276,22 @@ function _agentsforservice(c::SlaveContainer, svc::String)
   collect(c.services[svc])
 end
 
-function _deliver(c::SlaveContainer, msg)
+function _deliver(c::SlaveContainer, msg::Message, relay::Bool)
   c.running[] || return
   if msg.recipient.name ∈ keys(c.agents)
     _deliver(c.agents[msg.recipient.name], msg)
-  else
+  elseif relay
     _prepare!(msg)
     json = JSON.json(Dict("action" => "send", "relay" => true, "message" => msg))
     println(c.sock[], json)
+  elseif msg.recipient ∈ keys(c.topics)
+    foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
+  else
+    @debug "Message $(msg) undeliverable"
   end
 end
+
+_deliver(c::SlaveContainer, msg::Message) = _deliver(c, msg, true)
 
 ### agent
 

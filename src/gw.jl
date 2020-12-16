@@ -53,7 +53,7 @@ _subscriptions(gw::Gateway) = gw.subscriptions
 _services(gw::Gateway) = String[]
 _agentsforservice(gw::Gateway, svc) = String[]
 
-function _deliver(gw::Gateway, msg)
+function _deliver(gw::Gateway, msg::Message, relay::Bool)
   while length(gw.queue.data) >= MAX_QUEUE_LEN
     take!(gw.queue)
   end
@@ -104,7 +104,7 @@ function _run(gw)
           if rcpt ∈ _agents(gw) || rcpt ∈ _subscriptions(gw)
             try
               msg = _inflate(json["message"])
-              _deliver(gw, msg)
+              _deliver(gw, msg, json["relay"])
             catch ex
               @warn ex
             end
