@@ -174,13 +174,13 @@ function start(c::SlaveContainer)
     return c
   end
   @debug "Starting SlaveContainer..."
+  @debug "SlaveContainer connecting to $(c.host):$(c.port)..."
+  c.sock[] = connect(c.host, c.port)
+  @debug "SlaveContainer connected"
   c.running[] = true
   foreach(kv -> init(kv[2]), c.agents)
   @debug "SlaveContainer is running"
-  @debug "SlaveContainer connecting to $(c.host):$(c.port)..."
-  c.sock[] = connect(c.host, c.port)   # TODO: deal with errors
   @async _run(c)
-  @debug "SlaveContainer connected"
   c
 end
 
@@ -204,7 +204,11 @@ function shutdown(c::SlaveContainer)
   empty!(c.topics)
   empty!(c.services)
   c.running[] = false
-  println(c.sock[], "{\"alive\": false}")
+  try
+    println(c.sock[], "{\"alive\": false}")
+  catch ex
+    # ignore
+  end
   Base.close(c.sock[])
   @debug "Stopped SlaveContainer"
   nothing
@@ -561,7 +565,7 @@ function action(b::OneShotBehavior)
     b.action === nothing || b.action(b.agent, b)
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    @warn ex
+    @warn ex stacktrace(catch_backtrace())
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -593,7 +597,7 @@ function action(b::CyclicBehavior)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    @warn ex
+    @warn ex stacktrace(catch_backtrace())
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -623,7 +627,7 @@ function action(b::WakerBehavior)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    @warn ex
+    @warn ex stacktrace(catch_backtrace())
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -657,7 +661,7 @@ function action(b::TickerBehavior)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    @warn ex
+    @warn ex stacktrace(catch_backtrace())
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -687,7 +691,7 @@ function action(b::MessageBehavior)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    @warn ex
+    @warn ex stacktrace(catch_backtrace())
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -780,7 +784,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
         end
       end
     catch ex
-      @warn "Error during ParameterReq: $(ex)"
+      @warn ex stacktrace(catch_backtrace())
     end
   end
   rmsg = ParameterRsp(perf=Performative.INFORM, inReplyTo=msg.messageID, recipient=msg.sender, readonly=ro, index=ndx)

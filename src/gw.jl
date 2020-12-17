@@ -116,7 +116,8 @@ function _run(gw)
       end
     end
   catch ex
-    @warn ex
+    ex isa ErrorException && startswith(ex.msg, "Unexpected end of input") && return
+    @warn ex stacktrace(catch_backtrace())
   end
 end
 

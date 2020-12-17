@@ -60,15 +60,18 @@ function request(aid::AgentID, msg, timeout=1000)
   receive(aid.owner, msg, timeout)
 end
 
-function Base.show(io::IO, aid::AgentID)
-  compact = Base.get(io, :compact, false)
-  if aid.owner !== nothing && !compact
+function Base.show(io::IO, ::MIME"text/plain", aid::AgentID)
+  if aid.owner !== nothing
     rsp = aid << ParameterReq()
     if rsp !== nothing
       println(io, rsp)
       return
     end
   end
+  print(io, aid.istopic ? "#"*aid.name : aid.name)
+end
+
+function Base.show(io::IO, aid::AgentID)
   print(io, aid.istopic ? "#"*aid.name : aid.name)
 end
 
