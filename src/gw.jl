@@ -1,9 +1,10 @@
+export Gateway, agent, topic, agentforservice, agentsforservice
+export subscribe, unsubscribe, send, receive, request
+
 """
     gw = Gateway([name,] host, port)
 
 Open a new TCP/IP gateway to communicate with fjåge agents from Julia.
-
-See also: [`Fjage`](@ref)
 """
 struct Gateway
   agentID::AgentID
@@ -119,6 +120,8 @@ function _run(gw)
   end
 end
 
+AgentID(gw::Gateway) = gw.agentID
+agent(gw::Gateway, name::String) = AgentID(name, false, gw)
 topic(gw::Gateway, name::String) = AgentID(name, true, gw)
 topic(gw::Gateway, aid::AgentID) = aid.istopic ? aid : AgentID(aid.name*"__ntf", true, gw)
 topic(gw::Gateway, aid::AgentID, topic2::String) = AgentID(aid.name*"__"*topic2*"__ntf", true, gw)
@@ -156,9 +159,10 @@ function unsubscribe(gw::Gateway, aid::AgentID)
 end
 
 "Close a gateway connection to the master container."
-function close(gw::Gateway)
+function Base.close(gw::Gateway)
   println(gw.sock[], "{\"alive\": false}")
   Base.close(gw.sock[])
+  nothing
 end
 
 # prepares a message to be sent to the server
@@ -236,11 +240,13 @@ end
 Send a message via the gateway to the specified agent. The `recipient` field of the message must be
 populated with an agentID.
 """
-function send(gw::Gateway, msg::Message)
+function send(gw::Gateway, msg)
   msg.sender = gw.agentID
+  msg.sentAt = Dates.value(now())
   _prepare!(msg)
   json = JSON.json(Dict("action" => "send", "relay" => true, "message" => msg))
   println(gw.sock[], json)
+  true
 end
 
 """
@@ -272,7 +278,7 @@ function receive(gw::Gateway, timeout::Int=0)
   rv
 end
 
-function receive(gw::Gateway, filt, timeout::Int=0)
+function receive(gw::Gateway, filt, timeout=0)
   t1 = now() + Millisecond(timeout)
   cache = []
   while true
@@ -299,18 +305,15 @@ Send a request via the gateway to the specified agent, and wait for a response. 
 The `recipient` field of the request message (`msg`) must be populated with an agentID. The timeout
 is specified in milliseconds, and defaults to 1 second if unspecified.
 """
-function request(gw::Gateway, msg::Message, timeout::Int=1000)
+function request(gw::Gateway, msg, timeout=1000)
   send(gw, msg)
   receive(gw, msg, timeout)
 end
 
 "Flush the incoming message queue."
-function flush(gw::Gateway)
+function Base.flush(gw::Gateway)
   while isready(gw.queue)
     take!(gw.queue)
   end
+  nothing
 end
-
-# Base functions to add local methods
-Base.close(gw::Gateway) = close(gw)
-Base.flush(gw::Gateway) = flush(gw)

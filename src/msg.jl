@@ -1,3 +1,5 @@
+export Performative, Message, GenericMessage, MessageClass, AbstractMessageClass, ParameterReq, ParameterRsp
+
 # global variables
 const _messageclasses = Dict{String,DataType}()
 
@@ -17,62 +19,8 @@ module Performative
   const CANCEL = "CANCEL"
 end
 
-"Services"
-module Services
-  const SHELL = "org.arl.fjage.shell.Services.SHELL"
-end
-
 "Base class for messages transmitted by one agent to another."
 abstract type Message end
-
-"An identifier for an agent or a topic."
-struct AgentID
-  name::String
-  istopic::Bool
-  owner::Any
-end
-
-"""
-    aid = AgentID(name[, istopic])
-
-Create an unowned AgentID.
-
-See also: [`agent`](@ref), [`topic`](@ref)
-"""
-AgentID(name::String) = name[1] == '#' ? AgentID(name[2:end], true, nothing) : AgentID(name, false, nothing)
-AgentID(name::String, istopic::Bool) = AgentID(name, istopic, nothing)
-
-function Base.show(io::IO, aid::AgentID)
-  if aid.owner !== nothing
-    rsp = aid << ParameterReq()
-    if rsp !== nothing
-      println(io, rsp)
-      return
-    end
-  end
-  print(io, aid.istopic ? "#"*aid.name : aid.name)
-end
-
-JSON.lower(aid::AgentID) = aid.istopic ? "#"*aid.name : aid.name
-
-"""
-    aid = agent([owner,] name)
-
-Creates an AgentID for a named agent, optionally owned by a gateway/agent. AgentIDs that are
-associated with gateways/agents can be used directly in `send()` and `request()` calls.
-"""
-agent(name::String) = AgentID(name, false)
-agent(owner, name::String) = AgentID(name, false, owner)
-
-"""
-    aid = topic([owner,] name[, subtopic])
-
-Creates an AgentID for a named topic, optionally owned by an owner. AgentIDs that are
-associated with gateways/agents can be used directly in `send()` and `request()` calls.
-"""
-topic(name::String) = AgentID(name, true)
-topic(aid::AgentID) = aid.istopic ? aid : AgentID(aid.name*"__ntf", true)
-topic(aid::AgentID, topic2::String) = AgentID(aid.name*"__"*topic2*"__ntf", true)
 
 """
     mtype = MessageClass(context, clazz[, superclass[, performative]])
@@ -84,7 +32,6 @@ the performative is assumed to be REQUEST, and for all other messages, INFORM.
 # Examples
 
 ```julia-repl
-julia> using Fjage
 julia> MyShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq");
 julia> req = MyShellExecReq(cmd="ps")
 ShellExecReq: REQUEST [cmd:"ps"]
@@ -151,19 +98,6 @@ function _messageclass_lookup(clazz::String)
   Message
 end
 
-"""
-    send(aid, msg)
-
-Send a message via the gateway to the specified agent. The agentID (`aid`) specified
-must be an "owned" agentID obtained from the `agent(gw, name)` function or returned by the
-`agentforservice(gw, service)` function.
-"""
-function send(aid::AgentID, msg::Message)
-  aid.owner === nothing && throw(ArgumentError("cannot send message to an unowned agentID"))
-  msg.recipient = aid
-  send(aid.owner, msg)
-end
-
 # helper function to see if a message matches a filter
 function _matches(filt, msg)
   (msg === nothing || filt === nothing) && return true
@@ -176,28 +110,6 @@ function _matches(filt, msg)
   end
   false
 end
-
-"""
-    rsp = request(aid, msg[, timeout])
-
-Send a request via the gateway to the specified agent, and wait for a response. The response is returned.
-The agentID (`aid`) specified must be an "owned" agentID obtained from the `agent(gw, name)` function
-or returned by the `agentforservice(gw, service)` function. The timeout is specified in milliseconds,
-and defaults to 1 second if unspecified.
-"""
-function request(aid::AgentID, msg::Message, timeout::Int=1000)
-  send(aid, msg)
-  receive(aid.owner, msg, timeout)
-end
-
-"""
-    rsp = aid << msg
-
-Send a request via the gateway to the specified agent, and wait for a response.
-
-See also: [`request`](@ref), [`Fjage`](@ref)
-"""
-Base.:<<(aid::AgentID, msg::Message) = request(aid, msg)
 
 # adds notation message.field
 function Base.getproperty(s::Message, p::Symbol)
@@ -290,9 +202,6 @@ end
 "Generic message type that can carry arbitrary name-value pairs as data."
 GenericMessage = MessageClass(@__MODULE__, "org.arl.fjage.GenericMessage")
 
-"Shell command execution request message."
-ShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq")
-
 "Parameter request message."
 ParameterReq = MessageClass(@__MODULE__, "org.arl.fjage.param.ParameterReq")
 
@@ -309,56 +218,6 @@ is not specified, it defaults to INFORM. If the inreplyto is specified, the mess
 """
 Message(perf::String=Performative.INFORM) = GenericMessage(perf=perf)
 Message(inreplyto::Message, perf::String=Performative.INFORM) = GenericMessage(perf=perf, inReplyTo=inreplyto.msgID, recipient=inreplyto.sender)
-
-# add notation AgentID.property
-
-function Base.getproperty(aid::AgentID, p::Symbol; ndx=-1)
-  hasfield(AgentID, p) && return getfield(aid, p)
-  getfield(aid, :owner) === nothing && return nothing
-  rsp = aid << ParameterReq(param=string(p), index=ndx)
-  rsp === nothing && return nothing
-  rsp.value
-end
-
-function Base.setproperty!(aid::AgentID, p::Symbol, value; ndx=-1)
-  if hasfield(AgentID, p)
-    setfield!(aid, p, v)
-    return
-  end
-  name = getfield(aid, :name)
-  if getfield(aid, :owner) === nothing
-    @warn "Unable to set $(name).$(p): unowned agent"
-    return
-  end
-  rsp = aid << ParameterReq(param=string(p), value=value, index=ndx)
-  if rsp === nothing
-    @warn "Unable to set $(name).$(p): no response"
-    return
-  end
-  rsp.value != value && @warn "$(name).$(p) set to $(rsp.value)"
-  nothing
-end
-
-struct _IndexedAgentID
-  aid::AgentID
-  ndx::Int64
-end
-
-Base.getindex(aid::AgentID, ndx::Int64) = _IndexedAgentID(aid, ndx)
-Base.getproperty(iaid::_IndexedAgentID, p::Symbol) = Base.getproperty(getfield(iaid, :aid), p, ndx=getfield(iaid, :ndx))
-Base.setproperty!(iaid::_IndexedAgentID, p::Symbol, v) = Base.setproperty!(getfield(iaid, :aid), p, v, ndx=getfield(iaid, :ndx))
-
-function Base.show(io::IO, iaid::_IndexedAgentID)
-  aid = getfield(iaid, :aid)
-  if aid.owner !== nothing
-    rsp = aid << ParameterReq(index=getfield(iaid, :ndx))
-    if rsp !== nothing
-      println(io, rsp)
-      return
-    end
-  end
-  print(io, "$(getfield(getfield(iaid, :aid), :name))[$(getfield(iaid, :ndx))]")
-end
 
 # convenience methods and pretty printing for parameters
 
@@ -388,6 +247,7 @@ function org_arl_fjage_param_ParameterReq(vals...; index=-1)
   req
 end
 
+# TODO: improve API?
 function Base.get(p::ParameterRsp, key)
   skey = string(key)
   dskey = "." * skey

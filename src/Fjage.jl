@@ -29,19 +29,20 @@ module Fjage
 
 using Sockets, Distributed, Base64, UUIDs, Dates, JSON, MacroTools
 
-export Performative, AgentID, Gateway, Message, GenericMessage, MessageClass, AbstractMessageClass, ParameterReq, ParameterRsp, ShellExecReq
-export agent, topic, send, receive, request, agentforservice, agentsforservice, subscribe, unsubscribe, BLOCKING
-
-export RealTimePlatform, currenttimemillis, nanotime, delay, containers, isrunning, add, start, shutdown
+export agent, RealTimePlatform, currenttimemillis, nanotime, delay, containers, isrunning, add, start, shutdown
 export Container, SlaveContainer, containsagent, canlocate, agent, platform, ps, register, deregister
 export Agent, @agent, container, Services
 export Behavior, done, priority, block, restart, stop
 export OneShotBehavior, CyclicBehavior, WakerBehavior, TickerBehavior, MessageBehavior, ParameterMessageBehavior
 
-const MAX_QUEUE_LEN = 256
-const BLOCKING = -1
+export BLOCKING
 
-include("core.jl")
+const BLOCKING = -1
+const MAX_QUEUE_LEN = 256
+
+include("aid.jl")
+include("msg.jl")
+include("const.jl")
 include("gw.jl")
 include("container.jl")
 

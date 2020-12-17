@@ -361,6 +361,7 @@ agentsforservice(a::Agent, svc::String) = agentsforservice(container(a), svc, a)
 function send(a::Agent, msg::Message)
   @debug "sending $(msg)"
   msg.sender = AgentID(a)
+  msg.sentAt = currenttimemillis(a)
   _deliver(container(a), msg)
 end
 

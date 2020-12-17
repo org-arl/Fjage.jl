@@ -19,6 +19,7 @@ try
     @testset "Gateway" begin
       @test typeof(gw) <: Gateway
       @test typeof(gw.agentID) <: AgentID
+      @test AgentID(gw) isa AgentID
     end
 
     shell = agentforservice(gw, "org.arl.fjage.shell.Services.SHELL")
