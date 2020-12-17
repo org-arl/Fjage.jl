@@ -29,12 +29,6 @@ module Fjage
 
 using Sockets, Distributed, Base64, UUIDs, Dates, JSON, MacroTools
 
-export agent, RealTimePlatform, currenttimemillis, nanotime, delay, containers, isrunning, add, start, shutdown
-export Container, SlaveContainer, containsagent, canlocate, agent, platform, ps, register, deregister
-export Agent, @agent, container, Services
-export Behavior, done, priority, block, restart, stop
-export OneShotBehavior, CyclicBehavior, WakerBehavior, TickerBehavior, MessageBehavior, ParameterMessageBehavior
-
 export BLOCKING
 
 const BLOCKING = -1

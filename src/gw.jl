@@ -122,9 +122,6 @@ end
 
 AgentID(gw::Gateway) = gw.agentID
 agent(gw::Gateway, name::String) = AgentID(name, false, gw)
-topic(gw::Gateway, name::String) = AgentID(name, true, gw)
-topic(gw::Gateway, aid::AgentID) = aid.istopic ? aid : AgentID(aid.name*"__ntf", true, gw)
-topic(gw::Gateway, aid::AgentID, topic2::String) = AgentID(aid.name*"__"*topic2*"__ntf", true, gw)
 
 "Find an agent that provides a named service."
 function agentforservice(gw::Gateway, svc::String)

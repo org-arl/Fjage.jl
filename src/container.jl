@@ -1,3 +1,10 @@
+export Platform, add, currenttimemillis, delay, containers, isrunning, start, shutdown
+export Container, StandaloneContainer, SlaveContainer, canlocateagent, containsagent, agent, agents
+export register, deregister, services, add, agentforservice, agentsforservice, canlocateagent, ps
+export Agent, @agent, name, platform, send, subscribe, unsubscribe, die, stop, receive, request
+export Behavior, done, priority, block, restart, stop, isblocked, OneShotBehavior, CyclicBehavior
+export WakerBehavior, TickerBehavior, MessageBehavior, ParameterMessageBehavior
+
 abstract type Platform end
 abstract type Container end
 abstract type Agent end
@@ -10,7 +17,9 @@ Base.@kwdef struct RealTimePlatform <: Platform
   running = Ref(false)
 end
 
-Base.show(io::IO, p::RealTimePlatform) = print(io, "RealTimePlatform[running=", p.running[], ", containers=", length(p.containers), "]")
+function Base.show(io::IO, p::RealTimePlatform)
+  print(io, "RealTimePlatform[running=", p.running[], ", containers=", length(p.containers), "]")
+end
 
 currenttimemillis(::RealTimePlatform) = Dates.value(now())
 nanotime(::RealTimePlatform) = Dates.value(now()) * 1000000
@@ -27,12 +36,12 @@ function add(p::RealTimePlatform, c::Container)
 end
 
 function start(p::RealTimePlatform)
-  p.running[] && return
+  p.running[] && return p
   @debug "Starting RealTimePlatform..."
-  foreach(start, p.containers)
   p.running[] = true
+  foreach(start, p.containers)
   @debug "RealTimePlatform is running"
-  nothing
+  p
 end
 
 function shutdown(p::RealTimePlatform)
@@ -44,7 +53,7 @@ function shutdown(p::RealTimePlatform)
   nothing
 end
 
-### standalone container
+### standalone & slave containers
 
 struct StandaloneContainer{T <: Platform} <: Container
   platform::T
@@ -53,133 +62,6 @@ struct StandaloneContainer{T <: Platform} <: Container
   services::Dict{String,Set{AgentID}}
   running::Ref{Bool}
 end
-
-function Container(p)
-  c = StandaloneContainer(p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(), Dict{String,Set{AgentID}}(), Ref(false))
-  add(p, c)
-  c
-end
-
-Container() = Container(RealTimePlatform())
-
-Base.show(io::IO, c::Container) = print(io, typeof(c), "[running=", c.running[], ", platform=", typeof(c.platform), ", agents=", length(c.agents), "]")
-
-platform(c::Container) = c.platform
-isrunning(c::Container) = c.running[]
-
-containsagent(c::Container, aid::AgentID) = aid.name ∈ keys(c.agents)
-containsagent(c::Container, name::String) = name ∈ keys(c.agents)
-
-canlocate(c::StandaloneContainer, a) = containsagent(c, a)
-
-agent(c::Container, name::String) = c.agents[name]
-agent(c::Container, aid::AgentID) = agent(c, aid.name)
-
-function add(c::Container, name::String, a::Agent)
-  canlocate(c, name) && throw(ArgumentError("Duplicate agent name"))
-  a._container = c
-  a._aid = AgentID(name)
-  c.agents[name] = a
-  c.running[] && init(a)
-  @debug "Added agent $(name)::$(typeof(a))"
-  nothing
-end
-
-add(c::Container, a::Agent) = add(c, string(typeof(a)) * "-" * string(uuid4())[1:8], a)
-
-function kill(c::Container, name::String)
-  containsagent(c, name) || return false
-  a = c.agents[name]
-  if c.running[]
-    foreach(stop, a._behaviors)
-    shutdown(a)
-  end
-  a._container = nothing
-  a._aid = nothing
-  empty!(a._behaviors)
-  foreach(kv -> delete!(kv[2], a), c.topics)
-  foreach(kv -> delete!(kv[2], AgentID(name)), c.services)
-  delete!(c.agents, name)
-  @debug "Killed agent $(name)"
-  true
-end
-
-kill(c::Container, aid::AgentID) = kill(c, aid.name)
-kill(c::Container, a::Agent) = kill(c, AgentID(a))
-
-Base.kill(c::Container, a) = kill(c, a)
-
-function start(c::StandaloneContainer)
-  c.running[] && return
-  @debug "Starting StandaloneContainer..."
-  c.running[] = true
-  foreach(kv -> init(kv[2]), c.agents)
-  @debug "StandaloneContainer is running"
-  nothing
-end
-
-function shutdown(c::StandaloneContainer)
-  c.running[] || return
-  @debug "Stopping StandaloneContainer..."
-  foreach(name -> kill(c, name), keys(c.agents))
-  empty!(c.agents)
-  empty!(c.topics)
-  empty!(c.services)
-  c.running[] = false
-  @debug "Stopped StandaloneContainer"
-  nothing
-end
-
-ps(c::StandaloneContainer) = collect((kv[1], typeof(kv[2])) for kv ∈ c.agents)
-
-function subscribe(c::StandaloneContainer, t::AgentID, a::Agent)
-  t ∈ keys(c.topics) || (c.topics[t] = Set{Agent}())
-  push!(c.topics[t], a)
-  nothing
-end
-
-function unsubscribe(c::StandaloneContainer, t::AgentID, a::Agent)
-  t ∈ keys(c.topics) || return
-  delete!(c.topics[t], a)
-  nothing
-end
-
-function register(c::Container, svc::String, a::AgentID)
-  svc ∈ keys(c.services) || (c.services[svc] = Set{AgentID}())
-  push!(c.services[svc], a)
-  nothing
-end
-
-function deregister(c::Container, svc::String, a::AgentID)
-  svc ∈ keys(c.services) || return
-  delete!(c.services[svc], a)
-  nothing
-end
-
-function agentforservice(c::StandaloneContainer, svc::String, owner::AgentID)
-  svc ∈ keys(c.services) || return nothing
-  AgentID(first(c.services[svc]).name, false, owner)
-end
-
-function agentsforservice(c::StandaloneContainer, svc::String, owner::AgentID)
-  svc ∈ keys(c.services) || return AgentID[]
-  [AgentID(s.name, false, owner) for s ∈ c.services[svc]]
-end
-
-function _deliver(c::StandaloneContainer, msg::Message)
-  c.running[] || return
-  if msg.recipient.name ∈ keys(c.agents)
-    _deliver(c.agents[msg.recipient.name], msg)
-  elseif msg.recipient ∈ keys(c.topics)
-    foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
-  else
-    @debug "Message $(msg) undeliverable"
-  end
-end
-
-_deliver(::Nothing, msg::Message) = @debug "Delivered message $(msg) to nowhere"
-
-### slave container
 
 struct SlaveContainer{T <: Platform} <: Container
   platform::T
@@ -193,22 +75,104 @@ struct SlaveContainer{T <: Platform} <: Container
   port::Int
 end
 
-function SlaveContainer(p, host, port)
-  c = SlaveContainer(p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(), Dict{String,Set{AgentID}}(), Ref(false), Ref(TCPSocket()), Dict{String,Channel}(), host, port)
+Container() = Container(RealTimePlatform())
+
+function Container(p)
+  c = StandaloneContainer(p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(),
+    Dict{String,Set{AgentID}}(), Ref(false))
   add(p, c)
   c
 end
 
 SlaveContainer(host, port) = SlaveContainer(RealTimePlatform(), host, port)
 
-function canlocate(c::SlaveContainer, a)
-  containsagent(c, a) && return true
-  # TODO
+function SlaveContainer(p, host, port)
+  c = SlaveContainer(p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(),
+    Dict{String,Set{AgentID}}(), Ref(false), Ref(TCPSocket()), Dict{String,Channel}(), host, port)
+  add(p, c)
+  c
+end
+
+function Base.show(io::IO, c::Container)
+  print(io, typeof(c), "[running=", c.running[], ", platform=", typeof(c.platform),
+    ", agents=", length(c.agents), "]")
+end
+
+platform(c::Container) = c.platform
+isrunning(c::Container) = c.running[]
+
+containsagent(c::Container, aid::AgentID) = aid.name ∈ keys(c.agents)
+containsagent(c::Container, name::String) = name ∈ keys(c.agents)
+
+canlocateagent(c::StandaloneContainer, a) = containsagent(c, a)
+
+function canlocateagent(c::SlaveContainer, aid)
+  containsagent(c, aid) && return true
+  rq = Dict("action" => "containsAgent", "agentID" => aid)
+  rsp = _ask(c, rq)
+  haskey(rsp, "answer") && return rsp["answer"]::Bool
   false
 end
 
+agent(c::Container, name::String) = name ∈ keys(c.agents) ? c.agents[name] : nothing
+agent(c::Container, aid::AgentID) = agent(c, name(aid))
+
+agents(c::Container) = collect(values(c.agents))
+services(c::Container) = collect(keys(c.services))
+
+function add(c::Container, name::String, a::Agent)
+  canlocateagent(c, name) && throw(ArgumentError("Duplicate agent name"))
+  a._container = c
+  a._aid = AgentID(name)
+  c.agents[name] = a
+  c.running[] && init(a)
+  @debug "Added agent $(name)::$(typeof(a))"
+  a._aid
+end
+
+add(c::Container, a::Agent) = add(c, string(typeof(a)) * "-" * string(uuid4())[1:8], a)
+
+function Base.kill(c::Container, aid::String)
+  containsagent(c, aid) || return false
+  a = c.agents[aid]
+  if c.running[]
+    foreach(stop, a._behaviors)
+    shutdown(a)
+  end
+  a._container = nothing
+  a._aid = nothing
+  empty!(a._behaviors)
+  foreach(kv -> delete!(kv[2], a), c.topics)
+  foreach(kv -> delete!(kv[2], AgentID(aid)), c.services)
+  delete!(c.agents, aid)
+  @debug "Killed agent $(aid)"
+  true
+end
+
+Base.kill(c::Container, aid::AgentID) = kill(c, aid.name)
+Base.kill(c::Container, a::Agent) = kill(c, AgentID(a))
+
+function start(c::StandaloneContainer)
+  c.running[] && return c
+  if !isrunning(c.platform)
+    length(containers(c.platform)) > 1 && throw(ArgumentError("Platform is not running"))
+    start(platform(c))
+    return c
+  end
+  @debug "Starting StandaloneContainer..."
+  c.running[] = true
+  foreach(kv -> init(kv[2]), c.agents)
+  @debug "StandaloneContainer is running"
+  c
+end
+
 function start(c::SlaveContainer)
-  c.running[] && return
+  c.running[] && return c
+  if !isrunning(c.platform)
+    length(containers(c.platform)) > 1 && throw(ArgumentError("Platform is not running"))
+    start(platform(c))
+    return c
+  end
   @debug "Starting SlaveContainer..."
   c.running[] = true
   foreach(kv -> init(kv[2]), c.agents)
@@ -217,6 +181,18 @@ function start(c::SlaveContainer)
   c.sock[] = connect(c.host, c.port)   # TODO: deal with errors
   @async _run(c)
   @debug "SlaveContainer connected"
+  c
+end
+
+function shutdown(c::StandaloneContainer)
+  c.running[] || return
+  @debug "Stopping StandaloneContainer..."
+  foreach(name -> kill(c, name), keys(c.agents))
+  empty!(c.agents)
+  empty!(c.topics)
+  empty!(c.services)
+  c.running[] = false
+  @debug "Stopped StandaloneContainer"
   nothing
 end
 
@@ -234,9 +210,21 @@ function shutdown(c::SlaveContainer)
   nothing
 end
 
-function ps(c::SlaveContainer)
-  alist = collect((kv[1], typeof(kv[2])) for kv ∈ c.agents)
-  # TODO
+function subscribe(c::StandaloneContainer, t::AgentID, a::Agent)
+  t ∈ keys(c.topics) || (c.topics[t] = Set{Agent}())
+  push!(c.topics[t], a)
+  true
+end
+
+function unsubscribe(c::StandaloneContainer, a::Agent)
+  foreach(t -> delete!(c.topics[t], a), keys(c.topics))
+  nothing
+end
+
+function unsubscribe(c::StandaloneContainer, t::AgentID, a::Agent)
+  t ∈ keys(c.topics) || return false
+  delete!(c.topics[t], a)
+  true
 end
 
 function subscribe(c::SlaveContainer, t::AgentID, a::Agent)
@@ -244,15 +232,48 @@ function subscribe(c::SlaveContainer, t::AgentID, a::Agent)
   t ∈ keys(c.topics) || (c.topics[t] = Set{Agent}())
   push!(c.topics[t], a)
   _update_watch(c)
+  true
+end
+
+function unsubscribe(c::SlaveContainer, a::Agent)
+  foreach(t -> delete!(c.topics[t], a), keys(c.topics))
+  _update_watch(c)
   nothing
 end
 
 function unsubscribe(c::SlaveContainer, t::AgentID, a::Agent)
   t.istopic || (t = topic(t))
-  t ∈ keys(c.topics) || return
+  t ∈ keys(c.topics) || return false
   delete!(c.topics[t], a)
   _update_watch(c)
+  true
+end
+
+function register(c::Container, aid::AgentID, svc::String)
+  svc ∈ keys(c.services) || (c.services[svc] = Set{AgentID}())
+  push!(c.services[svc], aid)
+  true
+end
+
+function deregister(c::Container, aid::AgentID)
+  foreach(svc -> delete!(c.services[svc], aid), keys(c.services))
   nothing
+end
+
+function deregister(c::Container, aid::AgentID, svc::String)
+  svc ∈ keys(c.services) || return false
+  delete!(c.services[svc], aid)
+  true
+end
+
+function agentforservice(c::StandaloneContainer, svc::String, owner::AgentID)
+  svc ∈ keys(c.services) || return nothing
+  AgentID(first(c.services[svc]).name, false, owner)
+end
+
+function agentsforservice(c::StandaloneContainer, svc::String, owner::AgentID)
+  svc ∈ keys(c.services) || return AgentID[]
+  [AgentID(s.name, false, owner) for s ∈ c.services[svc]]
 end
 
 function agentforservice(c::SlaveContainer, svc::String, owner::Agent)
@@ -267,6 +288,37 @@ function agentsforservice(c::SlaveContainer, svc::String, owner::Agent)
   [AgentID(a, false, owner) for a in rsp["agentIDs"]]
 end
 
+send(c::Container, msg) = _deliver(c, msg, true)
+send(c::Container, msg, relay) = _deliver(c, msg, relay)
+
+ps(c::StandaloneContainer) = collect((kv[1], typeof(kv[2])) for kv ∈ c.agents)
+
+function ps(c::SlaveContainer)
+  rq = Dict("action" => "agents")
+  rsp = _ask(c, rq)
+  [(a, nothing) for a in rsp["agentIDs"]]
+end
+
+function _deliver(c::StandaloneContainer, msg::Message)
+  c.running[] || return false
+  if msg.recipient.name ∈ keys(c.agents)
+    _deliver(c.agents[msg.recipient.name], msg)
+  elseif msg.recipient ∈ keys(c.topics)
+    foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
+  else
+    @debug "Message $(msg) undeliverable"
+    return false
+  end
+  true
+end
+
+_deliver(c::StandaloneContainer, msg::Message, relay::Bool) = _deliver(c, msg)
+
+function _deliver(::Nothing, msg::Message)
+  @debug "Delivered message $(msg) to nowhere"
+  false
+end
+
 _agents(c::SlaveContainer) = collect(keys(c.agents))
 _subscriptions(c::SlaveContainer) = collect(string.(keys(c.topics)))
 _services(c::SlaveContainer) = collect(keys(c.services))
@@ -277,7 +329,7 @@ function _agentsforservice(c::SlaveContainer, svc::String)
 end
 
 function _deliver(c::SlaveContainer, msg::Message, relay::Bool)
-  c.running[] || return
+  c.running[] || return false
   if msg.recipient.name ∈ keys(c.agents)
     _deliver(c.agents[msg.recipient.name], msg)
   elseif relay
@@ -288,7 +340,9 @@ function _deliver(c::SlaveContainer, msg::Message, relay::Bool)
     foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
   else
     @debug "Message $(msg) undeliverable"
+    return false
   end
+  true
 end
 
 _deliver(c::SlaveContainer, msg::Message) = _deliver(c, msg, true)
@@ -335,7 +389,10 @@ function shutdown(a::Agent)
   @debug "Agent $(AgentID(a)) terminated"
 end
 
-stop(a::Agent) = kill(container(a), a)
+function stop(a::Agent)
+  kill(container(a), a)
+  nothing
+end
 
 function die(a::Agent, msg)
   @error msg
@@ -345,6 +402,9 @@ end
 platform(a::Agent) = platform(container(a))
 container(a::Agent) = a._container
 AgentID(a::Agent) = a._aid
+name(a::Agent) = name(a._aid)
+
+agent(a::Agent, name::String) = AgentID(name, false, a)
 
 currenttimemillis(a::Agent) = currenttimemillis(platform(a))
 nanotime(a::Agent) = nanotime(platform(a))
@@ -353,8 +413,8 @@ delay(a::Agent, millis) = delay(platform(a), millis)
 subscribe(a::Agent, t::AgentID) = subscribe(container(a), t, a)
 unsubscribe(a::Agent, t::AgentID) = unsubscribe(container(a), t, a)
 
-register(a::Agent, svc::String) = register(container(a), svc, AgentID(a))
-deregister(a::Agent, svc::String) = deregister(container(a), svc, AgentID(a))
+register(a::Agent, svc::String) = register(container(a), AgentID(a), svc)
+deregister(a::Agent, svc::String) = deregister(container(a), AgentID(a), svc)
 agentforservice(a::Agent, svc::String) = agentforservice(container(a), svc, a)
 agentsforservice(a::Agent, svc::String) = agentsforservice(container(a), svc, a)
 
@@ -395,9 +455,7 @@ function request(a::Agent, msg::Message, timeout::Int=1000)
   receive(a, msg, timeout)
 end
 
-flush(a::Agent) = empty!(a._msgqueue)
-
-Base.flush(a::Agent) = flush(a)
+Base.flush(a::Agent) = empty!(a._msgqueue)
 
 function _listen(a::Agent, ch::Channel, filt, priority::Int)
   for (n, (filt1, ch1, p)) ∈ enumerate(a._listeners)
@@ -447,12 +505,13 @@ function add(a::Agent, b::Behavior)
   @debug "Add $(typeof(b)) to agent $(a._aid)"
   push!(a._behaviors, b)
   @async action(b)
-  nothing
+  b
 end
 
 agent(b::Behavior) = b.agent
 done(b::Behavior) = b.done
 priority(b::Behavior) = b.priority
+isblocked(b::Behavior) = b.block !== nothing
 
 function block(b::Behavior)
   b.done && return

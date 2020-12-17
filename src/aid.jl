@@ -26,6 +26,9 @@ associated with gateways/agents can be used directly in `send()` and `request()`
 topic(name::String) = AgentID(name, true)
 topic(aid::AgentID) = aid.istopic ? aid : AgentID(aid.name*"__ntf", true)
 topic(aid::AgentID, topic2::String) = AgentID(aid.name*"__"*topic2*"__ntf", true)
+topic(owner, name::String) = AgentID(name, true, owner)
+topic(owner, aid::AgentID) = aid.istopic ? aid : AgentID(aid.name*"__ntf", true, owner)
+topic(owner, aid::AgentID, topic2::String) = AgentID(aid.name*"__"*topic2*"__ntf", true, owner)
 
 name(aid::AgentID) = aid.name
 owner(aid::AgentID) = aid.owner
