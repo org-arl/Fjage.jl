@@ -53,6 +53,8 @@ _agents(gw::Gateway) = [gw.agentID.name]
 _subscriptions(gw::Gateway) = gw.subscriptions
 _services(gw::Gateway) = String[]
 _agentsforservice(gw::Gateway, svc) = String[]
+_onclose(gw::Gateway) = close(gw.sock[])
+_shutdown(gw::Gateway) = close(gw)
 
 function _deliver(gw::Gateway, msg::Message, relay::Bool)
   while length(gw.queue.data) >= MAX_QUEUE_LEN
@@ -110,15 +112,19 @@ function _run(gw)
               @warn ex
             end
           end
+        elseif json["action"] == "shutdown"
+          _shutdown(gw)
         end
       elseif haskey(json, "alive") && json["alive"]
         println(gw.sock[], "{\"alive\": true}")
       end
     end
   catch ex
-    ex isa ErrorException && startswith(ex.msg, "Unexpected end of input") && return
-    @warn ex stacktrace(catch_backtrace())
+    if !(ex isa ErrorException && startswith(ex.msg, "Unexpected end of input"))
+      @warn ex stacktrace(catch_backtrace())
+    end
   end
+  _onclose(gw)
 end
 
 AgentID(gw::Gateway) = gw.agentID

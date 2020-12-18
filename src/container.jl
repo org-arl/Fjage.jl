@@ -214,6 +214,9 @@ function shutdown(c::SlaveContainer)
   nothing
 end
 
+_onclose(c::SlaveContainer) = shutdown(c)
+_shutdown(c::SlaveContainer) = shutdown(platform(c))
+
 function subscribe(c::StandaloneContainer, t::AgentID, a::Agent)
   t ∈ keys(c.topics) || (c.topics[t] = Set{Agent}())
   push!(c.topics[t], a)
