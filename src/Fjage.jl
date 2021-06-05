@@ -403,7 +403,14 @@ it must be an "owned" agentID obtained from the `agent(gw, name)` function or re
 """
 function send(gw::Gateway, msg::Message)
   _prepare!(gw, msg)
-  json = JSON.json(Dict("action" => "send", "relay" => true, "message" => msg))
+  json = JSON.json(Dict(
+    "action" => "send",
+    "relay" => true,
+    "message" => Dict(
+      "clazz" => msg.__clazz__,
+      "data" => msg.__data__
+    )
+  ))
   println(gw.sock, json)
 end
 
