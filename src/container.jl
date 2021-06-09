@@ -364,13 +364,23 @@ _deliver(c::SlaveContainer, msg::Message) = _deliver(c, msg, true)
 ### agent
 
 macro agent(sdef)
-  @capture(sdef, struct T_ fields__ end)
-  push!(fields, :(_aid::Union{AgentID,Nothing} = nothing))
-  push!(fields, :(_container::Union{Container,Nothing} = nothing))
-  push!(fields, :(_behaviors::Set{Behavior} = Set{Behavior}()))
-  push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
-  push!(fields, :(_msgqueue::Vector{Message} = Message[]))
-  :( Base.@kwdef mutable struct $T <: Agent; $(fields...); end ) |> esc
+  if @capture(sdef, struct T_ <: P_ fields__ end)
+    push!(fields, :(_aid::Union{AgentID,Nothing} = nothing))
+    push!(fields, :(_container::Union{Container,Nothing} = nothing))
+    push!(fields, :(_behaviors::Set{Behavior} = Set{Behavior}()))
+    push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
+    push!(fields, :(_msgqueue::Vector{Message} = Message[]))
+    :( Base.@kwdef mutable struct $T <: $P; $(fields...); end ) |> esc
+  elseif @capture(sdef, struct T_ fields__ end)
+    push!(fields, :(_aid::Union{AgentID,Nothing} = nothing))
+    push!(fields, :(_container::Union{Container,Nothing} = nothing))
+    push!(fields, :(_behaviors::Set{Behavior} = Set{Behavior}()))
+    push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
+    push!(fields, :(_msgqueue::Vector{Message} = Message[]))
+    :( Base.@kwdef mutable struct $T <: Agent; $(fields...); end ) |> esc
+  else
+    @error "Bad agent definition"
+  end
 end
 
 Base.show(io::IO, a::Agent) = print(io, typeof(a), "(", something(AgentID(a), "-"), ")")
