@@ -341,7 +341,14 @@ function _deliver(c::SlaveContainer, msg::Message, relay::Bool)
     _deliver(c.agents[msg.recipient.name], msg)
   elseif relay
     _prepare!(msg)
-    json = JSON.json(Dict("action" => "send", "relay" => true, "message" => msg))
+    json = JSON.json(Dict(
+      "action" => "send",
+      "relay" => true,
+      "message" => Dict(
+        "clazz" => msg.__clazz__,
+        "data" => msg.__data__
+      )
+    ))
     println(c.sock[], json)
   elseif msg.recipient ∈ keys(c.topics)
     foreach(a -> _deliver(a, msg), c.topics[msg.recipient])

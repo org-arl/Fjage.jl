@@ -29,10 +29,15 @@ Gateway(host::String, port::Int) = Gateway("julia-gw-" * string(uuid1()), host, 
 
 Base.show(io::IO, gw::Gateway) = print(io, gw.agentID.name)
 
+function _println(sock, s)
+  @debug ">> $s"
+  println(sock, s)
+end
+
 # respond to master container
 function _respond(gw, rq::Dict, rsp::Dict)
   s = JSON.json(merge(Dict("id" => rq["id"], "inResponseTo" => rq["action"]), rsp))
-  println(gw.sock[], s)
+  _println(gw.sock[], s)
 end
 
 # ask master container a question, and wait for reply
@@ -42,7 +47,7 @@ function _ask(gw, rq::Dict)
   ch = Channel{Dict}(1)
   gw.pending[id] = ch
   try
-    println(gw.sock[], s)
+    _println(gw.sock[], s)
     return take!(ch)
   finally
     delete!(gw.pending, id)
@@ -71,16 +76,17 @@ function _update_watch(gw)
     "action" => "wantsMessagesFor",
     "agentIDs" => watch
   ))
-  println(gw.sock[], s)
+  _println(gw.sock[], s)
 end
 
 # task monitoring incoming JSON messages from master container
 function _run(gw)
   try
-    println(gw.sock[], "{\"alive\": true}")
+    _println(gw.sock[], "{\"alive\": true}")
     _update_watch(gw)
     while isopen(gw.sock[])
       s = readline(gw.sock[])
+      @debug "<< $s"
       json = JSON.parse(s)
       if haskey(json, "id") && haskey(gw.pending, json["id"])
         put!(gw.pending[json["id"]], json)
@@ -116,7 +122,7 @@ function _run(gw)
           _shutdown(gw)
         end
       elseif haskey(json, "alive") && json["alive"]
-        println(gw.sock[], "{\"alive\": true}")
+        _println(gw.sock[], "{\"alive\": true}")
       end
     end
   catch ex
@@ -164,7 +170,7 @@ end
 
 "Close a gateway connection to the master container."
 function Base.close(gw::Gateway)
-  println(gw.sock[], "{\"alive\": false}")
+  _println(gw.sock[], "{\"alive\": false}")
   Base.close(gw.sock[])
   nothing
 end
@@ -248,8 +254,15 @@ function send(gw::Gateway, msg)
   msg.sender = gw.agentID
   msg.sentAt = Dates.value(now())
   _prepare!(msg)
-  json = JSON.json(Dict("action" => "send", "relay" => true, "message" => msg))
-  println(gw.sock[], json)
+  json = JSON.json(Dict(
+    "action" => "send",
+    "relay" => true,
+    "message" => Dict(
+      "clazz" => msg.__clazz__,
+      "data" => msg.__data__
+    )
+  ))
+  _println(gw.sock[], json)
   true
 end
 
