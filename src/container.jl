@@ -475,8 +475,21 @@ end
 receive(a::Agent, timeout::Int=0) = receive(a, nothing, timeout)
 
 function request(a::Agent, msg::Message, timeout::Int=1000)
+  timeout == 0 && throw(ArgumentError("request must use a non-zero timeout"))
+  (container(a) === nothing || !isrunning(container(a))) && return nothing
+  ch = Channel{Union{Message,Nothing}}(1)
+  _listen(a, ch, msg, -100)
   send(a, msg)
-  receive(a, msg, timeout)
+  if timeout > 0
+    @async begin
+      delay(a, timeout)
+      put!(ch, nothing)
+    end
+  end
+  msg = take!(ch)
+  _dont_listen(a, ch)
+  Base.close(ch)
+  msg
 end
 
 Base.flush(a::Agent) = empty!(a._msgqueue)
@@ -509,7 +522,7 @@ end
 function _deliver(a::Agent, msg::Message)
   @debug "$(a) <<< $(msg)"
   for (filt, ch, p) ∈ a._listeners
-    if _matches(filt, msg)
+    if !isready(ch) && _matches(filt, msg)
       put!(ch, msg)
       return
     end
