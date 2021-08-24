@@ -27,12 +27,14 @@ julia> close(gw)
 """
 module Fjage
 
-using Sockets, Distributed, Base64, UUIDs, Dates, JSON, MacroTools
+using Sockets, Distributed, Base64, UUIDs, Dates, Logging, Random
+using JSON, MacroTools, PkgVersion
 
 export BLOCKING
 
 const BLOCKING = -1
 const MAX_QUEUE_LEN = 256
+const VERSION = @PkgVersion.Version
 
 include("aid.jl")
 include("msg.jl")

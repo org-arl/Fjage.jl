@@ -1,14 +1,35 @@
-export Platform, add, currenttimemillis, delay, containers, isrunning, start, shutdown
+export Platform, RealTimePlatform, add, currenttimemillis, delay, containers, isrunning, start, shutdown
 export Container, StandaloneContainer, SlaveContainer, canlocateagent, containsagent, agent, agents
 export register, deregister, services, add, agentforservice, agentsforservice, canlocateagent, ps
+export name!, state, isidle, autoclone, autoclone!, addlistener, removelistener, buildversion
+export queuesize!, platformsend, loglevel!, store
 export Agent, @agent, name, platform, send, subscribe, unsubscribe, die, stop, receive, request
 export Behavior, done, priority, block, restart, stop, isblocked, OneShotBehavior, CyclicBehavior
-export WakerBehavior, TickerBehavior, MessageBehavior, ParameterMessageBehavior
+export WakerBehavior, TickerBehavior, MessageBehavior, ParameterMessageBehavior, BackoffBehavior, PoissonBehavior
+export backoff, tickcount
 
 abstract type Platform end
 abstract type Container end
 abstract type Agent end
 abstract type Behavior end
+
+### fallbacks
+
+name(::Nothing) = "-"
+platform(::Nothing) = nothing
+currenttimemillis(::Nothing) = Dates.value(now())
+nanotime(::Nothing) = Dates.value(now()) * 1000000
+delay(::Nothing, millis) = sleep(millis/1000)
+
+# FIXME: debug requires JULIA_DEBUG environment variable to be setup correctly
+function loglevel!(level)
+  (level === Logging.Debug || level === :debug) && return disable_logging(Logging.BelowMinLevel)
+  (level === Logging.Info || level === :info) && return disable_logging(Logging.Debug)
+  (level === Logging.Warn || level === :warn) && return disable_logging(Logging.Info)
+  (level === Logging.Error || level === :error) && return disable_logging(Logging.Warn)
+  (level === Logging.AboveMaxLevel || level === :none) && return disable_logging(Logging.Error)
+  throw(ArgumentError("Bad loglevel (allowed values are :debug, :info, :warn, :error, :none)"))
+end
 
 ### realtime platform
 
@@ -27,6 +48,10 @@ delay(::RealTimePlatform, millis) = sleep(millis/1000)
 
 containers(p::RealTimePlatform) = p.containers
 isrunning(p::RealTimePlatform) = p.running[]
+
+isidle(::RealTimePlatform) = true      # FIXME
+
+buildversion(::RealTimePlatform) = VERSION
 
 function add(p::RealTimePlatform, c::Container)
   platform(c) === p || throw(ArgumentError("Container bound to another platform"))
@@ -56,6 +81,7 @@ end
 ### standalone & slave containers
 
 struct StandaloneContainer{T <: Platform} <: Container
+  name::Ref{String}
   platform::T
   agents::Dict{String,Agent}
   topics::Dict{AgentID,Set{Agent}}
@@ -64,6 +90,7 @@ struct StandaloneContainer{T <: Platform} <: Container
 end
 
 struct SlaveContainer{T <: Platform} <: Container
+  name::Ref{String}
   platform::T
   agents::Dict{String,Agent}
   topics::Dict{AgentID,Set{Agent}}
@@ -75,10 +102,8 @@ struct SlaveContainer{T <: Platform} <: Container
   port::Int
 end
 
-Container() = Container(RealTimePlatform())
-
-function Container(p)
-  c = StandaloneContainer(p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(),
+function Container(p=RealTimePlatform(), name=string(uuid4()))
+  c = StandaloneContainer(Ref(name), p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(),
     Dict{String,Set{AgentID}}(), Ref(false))
   add(p, c)
   c
@@ -86,20 +111,33 @@ end
 
 SlaveContainer(host, port) = SlaveContainer(RealTimePlatform(), host, port)
 
-function SlaveContainer(p, host, port)
-  c = SlaveContainer(p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(),
+function SlaveContainer(p, host, port, name=string(uuid4()))
+  c = SlaveContainer(Ref(name), p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(),
     Dict{String,Set{AgentID}}(), Ref(false), Ref(TCPSocket()), Dict{String,Channel}(), host, port)
   add(p, c)
   c
 end
 
+name(c::Container) = c.name[]
+name!(c::Container, s::String) = (c.name[] = s)
+
 function Base.show(io::IO, c::Container)
-  print(io, typeof(c), "[running=", c.running[], ", platform=", typeof(c.platform),
-    ", agents=", length(c.agents), "]")
+  print(io, typeof(c), "[name=\"", name(c), "\", running=", c.running[], ", agents=", length(c.agents), "]")
 end
 
 platform(c::Container) = c.platform
 isrunning(c::Container) = c.running[]
+state(c::Container) = isrunning(c) ? "Running" : "Not running"
+
+isidle(::Container) = true     # FIXME
+
+# TODO: support autoclone
+autoclone(::Container) = false
+autoclone!(::Container, b::Bool) = b && throw(ArgumentError("autoclone not supported"))
+
+# TODO: support listeners
+addlistener(::Container, listener) = throw(ErrorException("Listeners not supported"))
+removelistener(::Container, listener) = false
 
 containsagent(c::Container, aid::AgentID) = aid.name ∈ keys(c.agents)
 containsagent(c::Container, name::String) = name ∈ keys(c.agents)
@@ -434,6 +472,17 @@ currenttimemillis(a::Agent) = currenttimemillis(platform(a))
 nanotime(a::Agent) = nanotime(platform(a))
 delay(a::Agent, millis) = delay(platform(a), millis)
 
+# FIXME: support agent-specific log levels
+loglevel!(::Agent, level) = loglevel!(level)
+
+# FIXME: improve agent state tracking
+function state(a::Agent)
+  # states in fjåge: IDLE/INIT/NONE/RUNNING/FINISHED/FINISHING
+  c = container(a)
+  c !== nothing && isrunning(c) && return :idle
+  :none
+end
+
 subscribe(a::Agent, t::AgentID) = subscribe(container(a), t, a)
 unsubscribe(a::Agent, t::AgentID) = unsubscribe(container(a), t, a)
 
@@ -442,12 +491,23 @@ deregister(a::Agent, svc::String) = deregister(container(a), AgentID(a), svc)
 agentforservice(a::Agent, svc::String) = agentforservice(container(a), svc, a)
 agentsforservice(a::Agent, svc::String) = agentsforservice(container(a), svc, a)
 
+# TODO: add support for persistent store
+store(::Agent) = throw(ErrorException("Persistent store not supported"))
+
+# TODO: support changeable queue size
+function queuesize!(::Agent, n)
+  n == MAX_QUEUE_LEN && return nothing
+  throw(ArgumentError("Changing queuesize is not supported (queuesize = $MAX_QUEUE_LEN)"))
+end
+
 function send(a::Agent, msg::Message)
   @debug "sending $(msg)"
   msg.sender = AgentID(a)
   msg.sentAt = currenttimemillis(a)
   _deliver(container(a), msg)
 end
+
+platformsend(::Agent, msg::Message) = throw(ErrorException("platformsend() not supported"))
 
 function receive(a::Agent, filt, timeout::Int=0; priority=(filt===nothing ? 0 : -100))
   (container(a) === nothing || !isrunning(container(a))) && return nothing
@@ -556,9 +616,27 @@ function block(b::Behavior)
   nothing
 end
 
-function restart(b::Behavior)
+function block(b::Behavior, millis)
   b.done && return
+  b.block = Condition()
+  b.timer = Timer(millis/1000)
+  @async begin
+    try
+      wait(b.timer)
+    finally
+      b.timer = nothing
+      restart(b)
+    end
+  end
+  nothing
+end
+
+function restart(b::Behavior)
   b.block === nothing && return
+  if b.timer !== nothing
+    close(b.timer)
+    return nothing
+  end
   oblock = b.block
   b.block = nothing
   notify(oblock)
@@ -576,12 +654,14 @@ Base.reset(b::Behavior) = reset(b)
 
 function stop(b::Behavior)
   b.done = true
+  restart(b)
   nothing
 end
 
 mutable struct OneShotBehavior <: Behavior
   agent::Union{Nothing,Agent}
   block::Union{Nothing,Condition}
+  timer::Union{Nothing,Timer}
   done::Bool
   priority::Int
   onstart::Union{Nothing,Function}
@@ -589,7 +669,7 @@ mutable struct OneShotBehavior <: Behavior
   onend::Union{Nothing,Function}
 end
 
-OneShotBehavior(action) = OneShotBehavior(nothing, nothing, false, 0, nothing, action, nothing)
+OneShotBehavior(action) = OneShotBehavior(nothing, nothing, nothing, false, 0, nothing, action, nothing)
 
 function action(b::OneShotBehavior)
   try
@@ -608,6 +688,7 @@ end
 mutable struct CyclicBehavior <: Behavior
   agent::Union{Nothing,Agent}
   block::Union{Nothing,Condition}
+  timer::Union{Nothing,Timer}
   done::Bool
   priority::Int
   onstart::Union{Nothing,Function}
@@ -615,7 +696,7 @@ mutable struct CyclicBehavior <: Behavior
   onend::Union{Nothing,Function}
 end
 
-CyclicBehavior(action) = CyclicBehavior(nothing, nothing, false, 0, nothing, action, nothing)
+CyclicBehavior(action) = CyclicBehavior(nothing, nothing, nothing, false, 0, nothing, action, nothing)
 
 function action(b::CyclicBehavior)
   try
@@ -641,6 +722,7 @@ mutable struct WakerBehavior <: Behavior
   agent::Union{Nothing,Agent}
   millis::Int64
   block::Union{Nothing,Condition}
+  timer::Union{Nothing,Timer}
   done::Bool
   priority::Int
   onstart::Union{Nothing,Function}
@@ -648,15 +730,19 @@ mutable struct WakerBehavior <: Behavior
   onend::Union{Nothing,Function}
 end
 
-WakerBehavior(action, millis::Int64) = WakerBehavior(nothing, millis, nothing, false, 0, nothing, action, nothing)
+WakerBehavior(action, millis::Int64) = WakerBehavior(nothing, millis, nothing, nothing, false, 0, nothing, action, nothing)
+BackoffBehavior(action, millis::Int64) = WakerBehavior(nothing, millis, nothing, nothing, false, 0, nothing, action, nothing)
 
 function action(b::WakerBehavior)
   try
     b.onstart === nothing || b.onstart(b.agent, b)
-    sleep(b.millis/1000)
-    if !b.done
+    while !b.done
+      block(b, b.millis)
       b.block === nothing || wait(b.block)
-      b.action === nothing || b.action(b.agent, b)
+      if !b.done
+        b.done = true
+        b.action === nothing || b.action(b.agent, b)
+      end
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
@@ -667,30 +753,71 @@ function action(b::WakerBehavior)
   b.agent = nothing
 end
 
+function backoff(b::WakerBehavior, millis::Int64)
+  b.done = false
+  b.millis = millis
+end
+
 mutable struct TickerBehavior <: Behavior
   agent::Union{Nothing,Agent}
   millis::Int64
   block::Union{Nothing,Condition}
+  timer::Union{Nothing,Timer}
   done::Bool
   priority::Int
   onstart::Union{Nothing,Function}
   action::Union{Nothing,Function}
   onend::Union{Nothing,Function}
+  ticks::Int64
 end
 
-TickerBehavior(action, millis::Int64) = TickerBehavior(nothing, millis, nothing, false, 0, nothing, action, nothing)
+TickerBehavior(action, millis::Int64) = TickerBehavior(nothing, millis, nothing, nothing, false, 0, nothing, action, nothing, 0)
+
+tickcount(b::TickerBehavior) = b.ticks
 
 function action(b::TickerBehavior)
   try
     b.onstart === nothing || b.onstart(b.agent, b)
     while !b.done
-      sleep(b.millis/1000)    # TODO: improve tick timing
-      b.done && break
-      if b.block === nothing
-        b.action === nothing || b.action(b.agent, b)
-      else
-        wait(b.block)
-      end
+      block(b, b.millis)
+      b.block === nothing || wait(b.block)
+      b.ticks += 1
+      b.done || b.action === nothing || b.action(b.agent, b)
+    end
+    b.onend === nothing || b.onend(b.agent, b)
+  catch ex
+    @warn ex stacktrace(catch_backtrace())
+  end
+  b.done = true
+  delete!(b.agent._behaviors, b)
+  b.agent = nothing
+end
+
+mutable struct PoissonBehavior <: Behavior
+  agent::Union{Nothing,Agent}
+  millis::Int64
+  block::Union{Nothing,Condition}
+  timer::Union{Nothing,Timer}
+  done::Bool
+  priority::Int
+  onstart::Union{Nothing,Function}
+  action::Union{Nothing,Function}
+  onend::Union{Nothing,Function}
+  ticks::Int64
+end
+
+PoissonBehavior(action, millis::Int64) = PoissonBehavior(nothing, millis, nothing, nothing, false, 0, nothing, action, nothing, 0)
+
+tickcount(b::PoissonBehavior) = b.ticks
+
+function action(b::PoissonBehavior)
+  try
+    b.onstart === nothing || b.onstart(b.agent, b)
+    while !b.done
+      block(b, round(Int64, b.millis * randexp()))
+      b.block === nothing || wait(b.block)
+      b.ticks += 1
+      b.done || b.action === nothing || b.action(b.agent, b)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
@@ -705,6 +832,7 @@ mutable struct MessageBehavior <: Behavior
   agent::Union{Nothing,Agent}
   filt::Any
   block::Union{Nothing,Condition}
+  timer::Union{Nothing,Timer}
   done::Bool
   priority::Int
   onstart::Union{Nothing,Function}
@@ -712,7 +840,7 @@ mutable struct MessageBehavior <: Behavior
   onend::Union{Nothing,Function}
 end
 
-MessageBehavior(action) = MessageBehavior(nothing, nothing, nothing, false, 0, nothing, action, nothing)
+MessageBehavior(action) = MessageBehavior(nothing, nothing, nothing, nothing, false, 0, nothing, action, nothing)
 MessageBehavior(action, filt) = MessageBehavior(nothing, filt, nothing, false, (filt===nothing ? 0 : -100), nothing, action, nothing)
 
 function action(b::MessageBehavior)
@@ -739,7 +867,7 @@ end
 
 ### parameters
 
-ParameterMessageBehavior() = MessageBehavior(nothing, ParameterReq, nothing, false, -100, nothing, _paramreq_action, nothing)
+ParameterMessageBehavior() = MessageBehavior(nothing, ParameterReq, nothing, nothing, false, -100, nothing, _paramreq_action, nothing)
 
 function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
   # resolve requests
