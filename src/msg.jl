@@ -247,27 +247,64 @@ function org_arl_fjage_param_ParameterReq(vals...; index=-1)
   req
 end
 
-function Base.get!(p::ParameterReq, key)
+"""
+    get!(p::ParameterReq, param)
+
+Request parameter `param` to be fetched.
+
+# Examples
+
+```julia-repl
+julia> p = ParameterReq(index=1)
+ParameterReq[index=1]
+julia> get!(p, "modulation")
+ParameterReq[index=1 modulation=?]
+julia> get!(p, "fec")
+ParameterReq[index=1 modulation=? ...]
+```
+"""
+function Base.get!(p::ParameterReq, param)
   if p.param === nothing
-    p.param = key
+    p.param = param
   else
     p.requests === nothing && (p.requests = Dict{String,Any}[])
-    push!(p.requests, Dict{String,Any}("param" => key))
+    push!(p.requests, Dict{String,Any}("param" => param))
   end
   p
 end
 
-function set!(p::ParameterReq, key, value)
+"""
+    set!(p::ParameterReq, param, value)
+
+Request parameter `param` to be set to `value`.
+
+# Examples
+
+```julia-repl
+julia> p = ParameterReq(index=1)
+ParameterReq[index=1]
+julia> set!(p, "modulation", "ofdm")
+ParameterReq[index=1 modulation=ofdm]
+julia> set!(p, "fec", 1)
+ParameterReq[index=1 modulation=ofdm ...]
+```
+"""
+function set!(p::ParameterReq, param, value)
   if p.param === nothing
-    p.param = key
+    p.param = param
     p.value = value
   else
     p.requests === nothing && (p.requests = Dict{String,Any}[])
-    push!(p.requests, Dict{String,Any}("param" => key, "value" => value))
+    push!(p.requests, Dict{String,Any}("param" => param, "value" => value))
   end
   p
 end
 
+"""
+    get(p::ParameterRsp, param)
+
+Extract parameter `param` from a parameter response message.
+"""
 function Base.get(p::ParameterRsp, key)
   skey = string(key)
   dskey = "." * skey
