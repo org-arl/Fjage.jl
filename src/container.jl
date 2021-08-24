@@ -36,6 +36,7 @@ end
 Base.@kwdef struct RealTimePlatform <: Platform
   containers = Container[]
   running = Ref(false)
+  term = Condition()
 end
 
 function Base.show(io::IO, p::RealTimePlatform)
@@ -75,7 +76,14 @@ function shutdown(p::RealTimePlatform)
   foreach(shutdown, p.containers)
   p.running[] = false
   @debug "Stopped RealTimePlatform"
+  notify(p.term)
   nothing
+end
+
+function Base.wait(p::RealTimePlatform)
+  while isrunning(p)
+    wait(p.term)
+  end
 end
 
 ### standalone & slave containers
@@ -594,6 +602,8 @@ function _deliver(a::Agent, msg::Message)
 end
 
 ### behaviors
+
+Base.show(io::IO, b::Behavior) = print(io, typeof(b), "/", name(b.agent))
 
 function add(a::Agent, b::Behavior)
   (b.agent === nothing && b.done == false) || throw(ArgumentError("Behavior already running"))

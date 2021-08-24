@@ -1,4 +1,4 @@
-export Performative, Message, GenericMessage, MessageClass, AbstractMessageClass, ParameterReq, ParameterRsp
+export Performative, Message, GenericMessage, MessageClass, AbstractMessageClass, ParameterReq, ParameterRsp, set!
 
 # global variables
 const _messageclasses = Dict{String,DataType}()
@@ -247,7 +247,27 @@ function org_arl_fjage_param_ParameterReq(vals...; index=-1)
   req
 end
 
-# TODO: improve API?
+function Base.get!(p::ParameterReq, key)
+  if p.param === nothing
+    p.param = key
+  else
+    p.requests === nothing && (p.requests = Dict{String,Any}[])
+    push!(p.requests, Dict{String,Any}("param" => key))
+  end
+  p
+end
+
+function set!(p::ParameterReq, key, value)
+  if p.param === nothing
+    p.param = key
+    p.value = value
+  else
+    p.requests === nothing && (p.requests = Dict{String,Any}[])
+    push!(p.requests, Dict{String,Any}("param" => key, "value" => value))
+  end
+  p
+end
+
 function Base.get(p::ParameterRsp, key)
   skey = string(key)
   dskey = "." * skey
