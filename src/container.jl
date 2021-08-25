@@ -913,7 +913,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
             x = get(a, Val(p))
             if x !== missing && x !== nothing
               push!(rsp, q => x)
-              hasmethod(set, Tuple{typeof(a),Val{p}}) || push!(ro, q)
+              isempty(methods(set, [typeof(a), Val{p}, Any])) && push!(ro, q)
             end
           elseif hasfield(typeof(a), p)
             x = getfield(a, p)
@@ -924,7 +924,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
             x = get(a, Val(p), ndx)
             if x !== missing && x !== nothing
               push!(rsp, q => x)
-              hasmethod(set, Tuple{typeof(a),Val{p},Int}) || push!(ro, q)
+              isempty(methods(set, [typeof(a), Val{p}, Int, Any])) && push!(ro, q)
             end
           end
         end
