@@ -862,7 +862,14 @@ function action(b::MessageBehavior)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    @warn ex stacktrace(catch_backtrace())
+    fname = basename(@__FILE__)
+    bt = String[]
+    for s ∈ stacktrace(catch_backtrace())
+      push!(bt, "    $s")
+      basename(string(s.file)) == fname && s.func == :run && break
+    end
+    bts = join(bt, '\n')
+    @error "$(ex)\n  Stack trace:\n$(bts)"
   end
   b.done = true
   delete!(b.agent._behaviors, b)
