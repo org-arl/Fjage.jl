@@ -95,6 +95,7 @@ struct StandaloneContainer{T <: Platform} <: Container
   topics::Dict{AgentID,Set{Agent}}
   services::Dict{String,Set{AgentID}}
   running::Ref{Bool}
+  initing::Ref{Bool}
 end
 
 struct SlaveContainer{T <: Platform} <: Container
@@ -104,6 +105,7 @@ struct SlaveContainer{T <: Platform} <: Container
   topics::Dict{AgentID,Set{Agent}}
   services::Dict{String,Set{AgentID}}
   running::Ref{Bool}
+  initing::Ref{Bool}
   sock::Ref{TCPSocket}
   pending::Dict{String,Channel}
   host::String
@@ -112,7 +114,7 @@ end
 
 function Container(p=RealTimePlatform(), name=string(uuid4()))
   c = StandaloneContainer(Ref(name), p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(),
-    Dict{String,Set{AgentID}}(), Ref(false))
+    Dict{String,Set{AgentID}}(), Ref(false), Ref(false))
   add(p, c)
   c
 end
@@ -121,7 +123,7 @@ SlaveContainer(host, port) = SlaveContainer(RealTimePlatform(), host, port)
 
 function SlaveContainer(p, host, port, name=string(uuid4()))
   c = SlaveContainer(Ref(name), p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(),
-    Dict{String,Set{AgentID}}(), Ref(false), Ref(TCPSocket()), Dict{String,Channel}(), host, port)
+    Dict{String,Set{AgentID}}(), Ref(false), Ref(false), Ref(TCPSocket()), Dict{String,Channel}(), host, port)
   add(p, c)
   c
 end
@@ -207,8 +209,15 @@ function start(c::StandaloneContainer)
   end
   @debug "Starting StandaloneContainer..."
   c.running[] = true
+  c.initing[] = true
   foreach(kv -> init(kv[2]), c.agents)
   @debug "StandaloneContainer is running"
+  c.initing[] = false
+  foreach(c.agents) do kv
+    foreach(kv[2]._behaviors) do b
+      @async action(b)
+    end
+  end
   c
 end
 
@@ -224,10 +233,22 @@ function start(c::SlaveContainer)
   c.sock[] = connect(c.host, c.port)
   @debug "SlaveContainer connected"
   c.running[] = true
+  c.initing[] = true
   foreach(kv -> init(kv[2]), c.agents)
   @debug "SlaveContainer is running"
+  # behaviors to be started and c.initing[] reset on _alive()
   @async _run(c)
   c
+end
+
+function _alive(c::SlaveContainer)
+  c.initing[] || return
+  c.initing[] = false
+  foreach(c.agents) do kv
+    foreach(kv[2]._behaviors) do b
+      @async action(b)
+    end
+  end
 end
 
 function shutdown(c::StandaloneContainer)
@@ -607,11 +628,12 @@ Base.show(io::IO, b::Behavior) = print(io, typeof(b), "/", name(b.agent))
 
 function add(a::Agent, b::Behavior)
   (b.agent === nothing && b.done == false) || throw(ArgumentError("Behavior already running"))
-  (container(a) === nothing || !isrunning(container(a))) && throw(ArgumentError("Agent not running"))
+  c = container(a)
+  (c === nothing || !isrunning(c)) && throw(ArgumentError("Agent not running"))
   b.agent = a
   @debug "Add $(typeof(b)) to agent $(a._aid)"
   push!(a._behaviors, b)
-  @async action(b)
+  c.initing[] || @async action(b)
   b
 end
 

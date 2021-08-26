@@ -60,6 +60,7 @@ _services(gw::Gateway) = String[]
 _agentsforservice(gw::Gateway, svc) = String[]
 _onclose(gw::Gateway) = close(gw.sock[])
 _shutdown(gw::Gateway) = close(gw)
+_alive(gw::Gateway) = nothing
 
 function _deliver(gw::Gateway, msg::Message, relay::Bool)
   while length(gw.queue.data) >= MAX_QUEUE_LEN
@@ -123,6 +124,7 @@ function _run(gw)
         end
       elseif haskey(json, "alive") && json["alive"]
         _println(gw.sock[], "{\"alive\": true}")
+        _alive(gw)
       end
     end
   catch ex
