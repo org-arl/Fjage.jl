@@ -31,6 +31,19 @@ function loglevel!(level)
   throw(ArgumentError("Bad loglevel (allowed values are :debug, :info, :warn, :error, :none)"))
 end
 
+### stacktrace pretty printing
+
+function reporterror(ex)
+  fname = basename(@__FILE__)
+  bt = String[]
+  for s ∈ stacktrace(catch_backtrace())
+    push!(bt, "    $s")
+    basename(string(s.file)) == fname && s.func == :run && break
+  end
+  bts = join(bt, '\n')
+  @error "$(ex)\n  Stack trace:\n$(bts)"
+end
+
 ### realtime platform
 
 Base.@kwdef struct RealTimePlatform <: Platform
@@ -710,7 +723,7 @@ function action(b::OneShotBehavior)
     b.action === nothing || b.action(b.agent, b)
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    @warn ex stacktrace(catch_backtrace())
+    reporterror(ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -735,7 +748,11 @@ function action(b::CyclicBehavior)
     b.onstart === nothing || b.onstart(b.agent, b)
     while !b.done
       if b.block === nothing
-        b.action === nothing || b.action(b.agent, b)
+        try
+          b.action === nothing || b.action(b.agent, b)
+        catch ex
+          reporterror(ex)
+        end
         yield()
       else
         wait(b.block)
@@ -743,7 +760,7 @@ function action(b::CyclicBehavior)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    @warn ex stacktrace(catch_backtrace())
+    reporterror(ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -778,7 +795,7 @@ function action(b::WakerBehavior)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    @warn ex stacktrace(catch_backtrace())
+    reporterror(ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -814,11 +831,15 @@ function action(b::TickerBehavior)
       block(b, b.millis)
       b.block === nothing || wait(b.block)
       b.ticks += 1
-      b.done || b.action === nothing || b.action(b.agent, b)
+      try
+        b.done || b.action === nothing || b.action(b.agent, b)
+      catch ex
+        reporterror(ex)
+      end
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    @warn ex stacktrace(catch_backtrace())
+    reporterror(ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -849,11 +870,15 @@ function action(b::PoissonBehavior)
       block(b, round(Int64, b.millis * randexp()))
       b.block === nothing || wait(b.block)
       b.ticks += 1
-      b.done || b.action === nothing || b.action(b.agent, b)
+      try
+        b.done || b.action === nothing || b.action(b.agent, b)
+      catch ex
+        reporterror(ex)
+      end
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    @warn ex stacktrace(catch_backtrace())
+    reporterror(ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -879,19 +904,16 @@ function action(b::MessageBehavior)
   try
     b.onstart === nothing || b.onstart(b.agent, b)
     while !b.done
-      msg = receive(b.agent, b.filt, BLOCKING; priority=b.priority)
-      msg === nothing || b.action === nothing || b.action(b.agent, b, msg)
+      try
+        msg = receive(b.agent, b.filt, BLOCKING; priority=b.priority)
+        msg === nothing || b.action === nothing || b.action(b.agent, b, msg)
+      catch ex
+        reporterror(ex)
+      end
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    fname = basename(@__FILE__)
-    bt = String[]
-    for s ∈ stacktrace(catch_backtrace())
-      push!(bt, "    $s")
-      basename(string(s.file)) == fname && s.func == :run && break
-    end
-    bts = join(bt, '\n')
-    @error "$(ex)\n  Stack trace:\n$(bts)"
+    reporterror(ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -984,7 +1006,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
         end
       end
     catch ex
-      @warn ex stacktrace(catch_backtrace())
+      reporterror(ex)
     end
   end
   rmsg = ParameterRsp(perf=Performative.INFORM, inReplyTo=msg.messageID, recipient=msg.sender, readonly=ro, index=ndx)
