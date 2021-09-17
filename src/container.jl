@@ -6,7 +6,7 @@ export queuesize!, platformsend, loglevel!, store
 export Agent, @agent, name, platform, send, subscribe, unsubscribe, die, stop, receive, request
 export Behavior, done, priority, block, restart, stop, isblocked, OneShotBehavior, CyclicBehavior
 export WakerBehavior, TickerBehavior, MessageBehavior, ParameterMessageBehavior, BackoffBehavior, PoissonBehavior
-export backoff, tickcount
+export backoff, tickcount, unlisted
 
 abstract type Platform end
 abstract type Container end
@@ -928,6 +928,8 @@ end
 
 ### parameters
 
+unlisted(p) = (:unlisted, p)
+
 ParameterMessageBehavior() = MessageBehavior(nothing, ParameterReq, nothing, nothing, false, -100, nothing, _paramreq_action, nothing)
 
 function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
@@ -939,6 +941,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
     push!(req, ("title", :title, nothing))
     push!(req, ("description", :description, nothing))
     for kv ∈ plist
+      kv[2] isa Tuple{Symbol,<:Any} && kv[2][1] === :unlisted && continue
       push!(req, (kv..., nothing))
     end
   else
@@ -1021,8 +1024,10 @@ function _resolve(plist, p, ndx)
   psym === :title && return p, psym
   psym === :description && return p, psym
   for kv ∈ plist
-    kv[1] == p && return kv
-    kv[2] === psym && return kv
+    k = kv[1]
+    v = kv[2] isa Tuple{Symbol,<:Any} ? kv[2][2] : kv[2]
+    k == p && return (k, v)
+    v === psym && return (k, v)
   end
   nothing
 end
