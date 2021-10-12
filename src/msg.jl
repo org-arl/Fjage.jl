@@ -1,4 +1,5 @@
-export Performative, Message, GenericMessage, MessageClass, AbstractMessageClass, ParameterReq, ParameterRsp, set!
+export Performative, Message, GenericMessage, MessageClass, AbstractMessageClass, ParameterReq, ParameterRsp
+export set!, registermessages
 
 # global variables
 const _messageclasses = Dict{String,DataType}()
@@ -91,6 +92,23 @@ function AbstractMessageClass(context, clazz::String, performative=nothing)
   rv = context.eval(expr)
   MessageClass(context, clazz, rv, performative)
   return rv
+end
+
+"""
+    registermessages()
+    registermessages(messageclasses)
+
+Register message classes with Fjage. Usually message classes are automatically registered on
+creation with `MessageClass()`. However, when developing packages, if `MessageClass()` is used
+at the module level, the types may be precompiled and the code to register the classes may not
+get executed at runtime. In such cases, you may need to explicitly call `registermessages()`
+in the `__init()__` funciton for the module.
+"""
+function registermessages(msg=subtypes(Fjage.Message))
+  for t ∈ msg
+    s = t().__clazz__
+    Fjage._messageclasses[s] = t
+  end
 end
 
 function _messageclass_lookup(clazz::String)

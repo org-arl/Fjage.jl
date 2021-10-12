@@ -29,6 +29,7 @@ module Fjage
 
 using Sockets, Distributed, Base64, UUIDs, Dates, Logging, Random
 using JSON, MacroTools, PkgVersion
+using InteractiveUtils: subtypes
 
 export BLOCKING
 
