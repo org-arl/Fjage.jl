@@ -6,7 +6,7 @@ export queuesize!, platformsend, loglevel!, store
 export Agent, @agent, name, platform, send, subscribe, unsubscribe, die, stop, receive, request
 export Behavior, done, priority, block, restart, stop, isblocked, OneShotBehavior, CyclicBehavior
 export WakerBehavior, TickerBehavior, MessageBehavior, ParameterMessageBehavior, BackoffBehavior, PoissonBehavior
-export backoff, tickcount, unlisted, issettable
+export backoff, tickcount
 
 abstract type Platform end
 abstract type Container end
@@ -20,8 +20,6 @@ platform(::Nothing) = nothing
 currenttimemillis(::Nothing) = Dates.value(now())
 nanotime(::Nothing) = Dates.value(now()) * 1000000
 delay(::Nothing, millis) = sleep(millis/1000)
-issettable(::Agent, p) = false
-issettable(::Agent, p, ::Int) = false
 
 # FIXME: debug requires JULIA_DEBUG environment variable to be setup correctly
 function loglevel!(level)
@@ -930,9 +928,93 @@ end
 
 ### parameters
 
-unlisted(p) = (:unlisted, p)
-
 ParameterMessageBehavior() = MessageBehavior(nothing, ParameterReq, nothing, nothing, false, -100, nothing, _paramreq_action, nothing)
+
+params(a::Agent) = Pair{String,Symbol}[]
+params(a::Agent, ndx) = Pair{String,Symbol}[]
+
+Fjage.get(a::Agent, ::Val{:type}) = string(typeof(a))
+Fjage.get(a::Agent, ::Val{:title}) = string(AgentID(a))
+Fjage.get(a::Agent, ::Val{:description}) = ""
+
+function set end
+function isreadonly end
+function isunlisted end
+
+function _isunlisted(a::Agent, p, ndx)
+  try
+    return ndx < 0 ? isunlisted(a, Val(p)) : isunlisted(a, Val(p), ndx)
+  catch end
+  try
+    return ndx < 0 ? isunlisted(a, p) : isunlisted(a, p, ndx)
+  catch end
+  false
+end
+
+function _get(a::Agent, p)
+  x = missing
+  isro = missing
+  try
+    x = Fjage.get(a, Val(p))
+  catch end
+  try
+    x === missing && (x = Fjage.get(a, p))
+  catch end
+  try
+    x = getfield(a, p)
+    isro = false
+  catch end
+  try
+    isro === missing && (isro = isreadonly(a, Val(p)))
+  catch end
+  try
+    isro === missing && (isro = isreadonly(a, p))
+  catch end
+  isro === missing && (isro = isempty(methods(set, [typeof(a), Val{p}, Any])))
+  x, isro
+end
+
+function _get(a::Agent, p, ndx::Int)
+  x = missing
+  isro = missing
+  try
+    x = Fjage.get(a, Val(p), ndx)
+  catch end
+  try
+    x === missing && (x = Fjage.get(a, p, ndx))
+  catch end
+  try
+    isro = isreadonly(a, Val(p), ndx)
+  catch end
+  try
+    isro === missing && (isro = isreadonly(a, p, ndx))
+  catch end
+  isro === missing && (isro = isempty(methods(set, [typeof(a), Val{p}, Int, Any])))
+  x, isro
+end
+
+function _set(a::Agent, p, v)
+  try
+    return set(a, Val(p), v)
+  catch end
+  try
+    return set(a, p, v)
+  catch end
+  try
+    return setfield!(a, p, v)
+  catch end
+  missing
+end
+
+function _set(a::Agent, p, ndx::Int, v)
+  try
+    return set(a, Val(p), ndx, v)
+  catch end
+  try
+    return set(a, p, ndx, v)
+  catch end
+  missing
+end
 
 function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
   # resolve requests
@@ -943,8 +1025,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
     push!(req, ("title", :title, nothing))
     push!(req, ("description", :description, nothing))
     for kv ∈ plist
-      kv[2] isa Tuple{Symbol,<:Any} && kv[2][1] === :unlisted && continue
-      push!(req, (kv..., nothing))
+      _isunlisted(a, kv[2], ndx) || push!(req, (kv..., nothing))
     end
   else
     rr = _resolve(plist, msg.param, ndx)
@@ -965,65 +1046,27 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
     try
       if v === nothing   # get
         if ndx < 0
-          if hasmethod(get, Tuple{typeof(a),Val{p}})
-            x = get(a, Val(p))
-            if x !== missing && x !== nothing
-              push!(rsp, q => x)
-              isempty(methods(set, [typeof(a), Val{p}, Any])) && !issettable(a, p) && push!(ro, q)
-            end
-          elseif hasfield(typeof(a), p)
-            x = getfield(a, p)
-            x === missing || x === nothing || push!(rsp, q => x)
+          x, isro = _get(a, p)
+          if x !== missing && x !== nothing
+            push!(rsp, q => x)
+            isro && push!(ro, q)
           end
         else
-          if hasmethod(get, Tuple{typeof(a),Val{p},Int})
-            x = get(a, Val(p), ndx)
-            if x !== missing && x !== nothing
-              push!(rsp, q => x)
-              isempty(methods(set, [typeof(a), Val{p}, Int, Any])) && !issettable(a, p, ndx) && push!(ro, q)
-            end
+          x, isro = _get(a, p, ndx)
+          if x !== missing && x !== nothing
+            push!(rsp, q => x)
+            isro && push!(ro, q)
           end
         end
       else # set
         if ndx < 0
-          if hasmethod(set, Tuple{typeof(a),Val{p},typeof(v)})
-            x = set(a, Val(p), v)
-            if x === missing || x === nothing
-              if hasmethod(get, Tuple{typeof(a),Val{p}})
-                x = get(a, Val(p))
-              elseif hasfield(typeof(a), p)
-                x = getfield(a, p)
-              end
-            end
-            x === missing || x === nothing || push!(rsp, q => x)
-          elseif hasfield(typeof(a), p)
-            x = setfield!(a, p, v)
-            push!(rsp, q => x)
-          elseif issettable(a, p)
-            x = set(a, p, v)
-            if x === missing || x === nothing
-              if hasmethod(get, Tuple{typeof(a),Val{p}})
-                x = get(a, Val(p))
-              elseif hasfield(typeof(a), p)
-                x = getfield(a, p)
-              end
-            end
-            x === missing || x === nothing || push!(rsp, q => x)
-          end
+          x = _set(a, p, v)
+          (x === missing || x === nothing) && (x = _get(a, p))
+          x === missing || x === nothing || push!(rsp, q => x)
         else
-          if hasmethod(set, Tuple{typeof(a),Val{p},Int,typeof(v)})
-            x = set(a, Val(p), ndx, v)
-            if x === missing || x === nothing
-              hasmethod(get, Tuple{typeof(a),Val{p},Int}) && (x = get(a, Val(p), ndx))
-            end
-            x === missing || x === nothing || push!(rsp, q => x)
-          elseif issettable(a, p, ndx)
-            x = set(a, p, ndx, v)
-            if x === missing || x === nothing
-              hasmethod(get, Tuple{typeof(a),Val{p},Int}) && (x = get(a, Val(p), ndx))
-            end
-            x === missing || x === nothing || push!(rsp, q => x)
-          end
+          x = _set(a, p, ndx, v)
+          (x === missing || x === nothing) && (x = _get(a, p, ndx))
+          x === missing || x === nothing || push!(rsp, q => x)
         end
       end
     catch ex
@@ -1041,20 +1084,9 @@ function _resolve(plist, p, ndx)
   psym === :type && return p, psym
   psym === :title && return p, psym
   psym === :description && return p, psym
-  for kv ∈ plist
-    k = kv[1]
-    v = kv[2] isa Tuple{Symbol,<:Any} ? kv[2][2] : kv[2]
+  for (k, v) ∈ plist
     k == p && return (k, v)
     v === psym && return (k, v)
   end
   nothing
 end
-
-params(a::Agent) = Pair{String,Symbol}[]
-params(a::Agent, ndx) = Pair{String,Symbol}[]
-
-get(a::Agent, ::Val{:type}) = string(typeof(a))
-get(a::Agent, ::Val{:title}) = string(AgentID(a))
-get(a::Agent, ::Val{:description}) = ""
-
-function set end
