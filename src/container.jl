@@ -6,7 +6,7 @@ export queuesize!, platformsend, loglevel!, store
 export Agent, @agent, name, platform, send, subscribe, unsubscribe, die, stop, receive, request
 export Behavior, done, priority, block, restart, stop, isblocked, OneShotBehavior, CyclicBehavior
 export WakerBehavior, TickerBehavior, MessageBehavior, ParameterMessageBehavior, BackoffBehavior, PoissonBehavior
-export backoff, tickcount, unlisted
+export backoff, tickcount, unlisted, issettable
 
 abstract type Platform end
 abstract type Container end
@@ -20,6 +20,8 @@ platform(::Nothing) = nothing
 currenttimemillis(::Nothing) = Dates.value(now())
 nanotime(::Nothing) = Dates.value(now()) * 1000000
 delay(::Nothing, millis) = sleep(millis/1000)
+issettable(::Agent, p) = false
+issettable(::Agent, p, ::Int) = false
 
 # FIXME: debug requires JULIA_DEBUG environment variable to be setup correctly
 function loglevel!(level)
@@ -967,7 +969,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
             x = get(a, Val(p))
             if x !== missing && x !== nothing
               push!(rsp, q => x)
-              isempty(methods(set, [typeof(a), Val{p}, Any])) && push!(ro, q)
+              isempty(methods(set, [typeof(a), Val{p}, Any])) && !issettable(a, p) && push!(ro, q)
             end
           elseif hasfield(typeof(a), p)
             x = getfield(a, p)
@@ -978,7 +980,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
             x = get(a, Val(p), ndx)
             if x !== missing && x !== nothing
               push!(rsp, q => x)
-              isempty(methods(set, [typeof(a), Val{p}, Int, Any])) && push!(ro, q)
+              isempty(methods(set, [typeof(a), Val{p}, Int, Any])) && !issettable(a, p, ndx) && push!(ro, q)
             end
           end
         end
@@ -997,10 +999,26 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
           elseif hasfield(typeof(a), p)
             x = setfield!(a, p, v)
             push!(rsp, q => x)
+          elseif issettable(a, p)
+            x = set(a, p, v)
+            if x === missing || x === nothing
+              if hasmethod(get, Tuple{typeof(a),Val{p}})
+                x = get(a, Val(p))
+              elseif hasfield(typeof(a), p)
+                x = getfield(a, p)
+              end
+            end
+            x === missing || x === nothing || push!(rsp, q => x)
           end
         else
           if hasmethod(set, Tuple{typeof(a),Val{p},Int,typeof(v)})
             x = set(a, Val(p), ndx, v)
+            if x === missing || x === nothing
+              hasmethod(get, Tuple{typeof(a),Val{p},Int}) && (x = get(a, Val(p), ndx))
+            end
+            x === missing || x === nothing || push!(rsp, q => x)
+          elseif issettable(a, p, ndx)
+            x = set(a, p, ndx, v)
             if x === missing || x === nothing
               hasmethod(get, Tuple{typeof(a),Val{p},Int}) && (x = get(a, Val(p), ndx))
             end
