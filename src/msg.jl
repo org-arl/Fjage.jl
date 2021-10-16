@@ -1,5 +1,4 @@
-export Performative, Message, GenericMessage, MessageClass, AbstractMessageClass, ParameterReq, ParameterRsp
-export set!, registermessages
+export Performative, Message, GenericMessage, MessageClass, AbstractMessageClass, ParameterReq, ParameterRsp, set!
 
 # global variables
 const _messageclasses = Dict{String,DataType}()
@@ -106,8 +105,10 @@ in the `__init()__` funciton for the module.
 """
 function registermessages(msg=subtypes(Fjage.Message))
   for t ∈ msg
+    endswith(string(t), '_') && continue
     s = t().__clazz__
     Fjage._messageclasses[s] = t
+    registermessages(subtypes(t))
   end
 end
 
