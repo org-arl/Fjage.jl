@@ -576,7 +576,7 @@ end
 
 receive(a::Agent, timeout::Int=0) = receive(a, nothing, timeout)
 
-function request(a::Agent, msg::Message, timeout::Int=1000)
+function request(a::Agent, msg::Message, timeout::Int=timeout[])
   timeout == 0 && throw(ArgumentError("request must use a non-zero timeout"))
   (container(a) === nothing || !isrunning(container(a))) && return nothing
   ch = Channel{Union{Message,Nothing}}(1)

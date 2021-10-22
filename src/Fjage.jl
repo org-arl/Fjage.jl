@@ -37,6 +37,16 @@ const BLOCKING = -1
 const MAX_QUEUE_LEN = 256
 const VERSION = @PkgVersion.Version
 
+const timeout = Ref(1000)
+
+"""
+    default_timeout(millis)
+
+Set default timeout for requests. This timeout is used when not explicitly
+specified. The timeout is given in milliseconds.
+"""
+default_timeout(t) = (timeout[] = t)
+
 include("aid.jl")
 include("msg.jl")
 include("const.jl")
