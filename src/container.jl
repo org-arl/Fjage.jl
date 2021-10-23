@@ -1,3 +1,5 @@
+using Base.Threads: Condition
+
 export Platform, RealTimePlatform, add, currenttimemillis, delay, containers, isrunning, start, shutdown
 export Container, StandaloneContainer, SlaveContainer, canlocateagent, containsagent, agent, agents
 export register, deregister, services, add, agentforservice, agentsforservice, canlocateagent, ps
@@ -89,13 +91,15 @@ function shutdown(p::RealTimePlatform)
   foreach(shutdown, p.containers)
   p.running[] = false
   @debug "Stopped RealTimePlatform"
-  notify(p.term)
+  lock(() -> notify(p.term), p.term)
   nothing
 end
 
 function Base.wait(p::RealTimePlatform)
-  while isrunning(p)
-    wait(p.term)
+  lock(p.term) do
+    while isrunning(p)
+      wait(p.term)
+    end
   end
 end
 
@@ -686,7 +690,7 @@ function restart(b::Behavior)
   end
   oblock = b.block
   b.block = nothing
-  notify(oblock)
+  lock(() -> notify(oblock), oblock)
   nothing
 end
 
@@ -721,7 +725,7 @@ OneShotBehavior(action) = OneShotBehavior(nothing, nothing, nothing, false, 0, n
 function action(b::OneShotBehavior)
   try
     b.onstart === nothing || b.onstart(b.agent, b)
-    b.block === nothing || wait(b.block)
+    b.block === nothing || lock(() -> wait(b.block), b.block)
     b.action === nothing || b.action(b.agent, b)
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
@@ -757,7 +761,7 @@ function action(b::CyclicBehavior)
         end
         yield()
       else
-        wait(b.block)
+        lock(() -> wait(b.block), b.block)
       end
     end
     b.onend === nothing || b.onend(b.agent, b)
@@ -789,7 +793,7 @@ function action(b::WakerBehavior)
     b.onstart === nothing || b.onstart(b.agent, b)
     while !b.done
       block(b, b.millis)
-      b.block === nothing || wait(b.block)
+      b.block === nothing || lock(() -> wait(b.block), b.block)
       if !b.done
         b.done = true
         b.action === nothing || b.action(b.agent, b)
@@ -831,7 +835,7 @@ function action(b::TickerBehavior)
     b.onstart === nothing || b.onstart(b.agent, b)
     while !b.done
       block(b, b.millis)
-      b.block === nothing || wait(b.block)
+      b.block === nothing || lock(() -> wait(b.block), b.block)
       b.ticks += 1
       try
         b.done || b.action === nothing || b.action(b.agent, b)
@@ -870,7 +874,7 @@ function action(b::PoissonBehavior)
     b.onstart === nothing || b.onstart(b.agent, b)
     while !b.done
       block(b, round(Int64, b.millis * randexp()))
-      b.block === nothing || wait(b.block)
+      b.block === nothing || lock(() -> wait(b.block), b.block)
       b.ticks += 1
       try
         b.done || b.action === nothing || b.action(b.agent, b)
