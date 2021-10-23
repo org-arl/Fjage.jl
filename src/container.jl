@@ -169,6 +169,7 @@ containsagent(c::Container, name::String) = name ∈ keys(c.agents)
 canlocateagent(c::StandaloneContainer, a) = containsagent(c, a)
 
 function canlocateagent(c::SlaveContainer, aid)
+  c.running[] || return false
   containsagent(c, aid) && return true
   rq = Dict("action" => "containsAgent", "agentID" => aid)
   rsp = _ask(c, rq)
