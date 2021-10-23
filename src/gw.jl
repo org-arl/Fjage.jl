@@ -29,6 +29,8 @@ Gateway(host::String, port::Int) = Gateway("julia-gw-" * string(uuid1()), host, 
 
 Base.show(io::IO, gw::Gateway) = print(io, gw.agentID.name)
 
+name(gw::Gateway) = gw.agentID.name
+
 function _println(sock, s)
   @debug ">> $s"
   println(sock, s)
@@ -84,6 +86,7 @@ end
 function _run(gw)
   try
     _println(gw.sock[], "{\"alive\": true}")
+    _println(gw.sock[], "{\"action\": \"auth\", \"name\": \"$(name(gw))\"}")
     _update_watch(gw)
     while isopen(gw.sock[])
       s = readline(gw.sock[])

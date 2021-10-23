@@ -133,8 +133,9 @@ function Container(p=RealTimePlatform(), name=string(uuid4()))
 end
 
 SlaveContainer(host, port) = SlaveContainer(RealTimePlatform(), host, port)
+SlaveContainer(host, port, name) = SlaveContainer(RealTimePlatform(), host, port, name)
 
-function SlaveContainer(p, host, port, name=string(uuid4()))
+function SlaveContainer(p::Platform, host, port, name=string(uuid4()))
   c = SlaveContainer(Ref(name), p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(),
     Dict{String,Set{AgentID}}(), Ref(false), Ref(false), Ref(TCPSocket()), Dict{String,Channel}(), host, port)
   add(p, c)
