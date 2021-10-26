@@ -1,5 +1,6 @@
 export Services, ShellExecReq
 
+"List of fjåge services."
 module Services
   const SHELL = "org.arl.fjage.shell.Services.SHELL"
 end

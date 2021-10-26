@@ -29,6 +29,11 @@ Gateway(host::String, port::Int) = Gateway("julia-gw-" * string(uuid1()), host, 
 
 Base.show(io::IO, gw::Gateway) = print(io, gw.agentID.name)
 
+"""
+    name(gw)
+
+Get the name of the gateway.
+"""
 name(gw::Gateway) = gw.agentID.name
 
 function _println(sock, s)
