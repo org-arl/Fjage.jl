@@ -8,17 +8,21 @@ Open a new TCP/IP gateway to communicate with fjåge agents from Julia.
 """
 struct Gateway
   agentID::AgentID
-  sock::Ref{TCPSocket}
+  sock::Ref{Union{TCPSocket,Nothing}}
   subscriptions::Set{String}
   pending::Dict{String,Channel}
   queue::Channel
+  host::String
+  port::Int
   function Gateway(name::String, host::String, port::Int)
     gw = new(
       AgentID(name, false),
       Ref(connect(host, port)),
       Set{String}(),
       Dict{String,Channel}(),
-      Channel(MAX_QUEUE_LEN)
+      Channel(MAX_QUEUE_LEN),
+      host,
+      port
     )
     @async _run(gw)
     gw
@@ -31,15 +35,34 @@ Base.show(io::IO, gw::Gateway) = print(io, gw.agentID.name)
 
 name(gw::Gateway) = gw.agentID.name
 
-function _println(sock, s)
+function _reconnect(gw::Gateway)
+  gw.sock[] === nothing && return
+  isopen(gw.sock[]) && return
+  try
+    @warn "Reconnecting..."
+    gw.sock[] = connect(gw.host, gw.port)
+  catch ex
+    @warn "Connection failed: $ex"
+  end
+end
+
+function _println(gw::Gateway, s)
+  gw.sock[] === nothing && return
   @debug ">> $s"
-  println(sock, s)
+  for i ∈ 1:2
+    try
+      println(gw.sock[], s)
+      return
+    catch
+      _reconnect(gw)
+    end
+  end
 end
 
 # respond to master container
 function _respond(gw, rq::Dict, rsp::Dict)
   s = JSON.json(merge(Dict("id" => rq["id"], "inResponseTo" => rq["action"]), rsp))
-  _println(gw.sock[], s)
+  _println(gw, s)
 end
 
 # ask master container a question, and wait for reply
@@ -49,7 +72,7 @@ function _ask(gw, rq::Dict)
   ch = Channel{Dict}(1)
   gw.pending[id] = ch
   try
-    _println(gw.sock[], s)
+    _println(gw, s)
     return take!(ch)
   finally
     delete!(gw.pending, id)
@@ -60,7 +83,7 @@ _agents(gw::Gateway) = [gw.agentID.name]
 _subscriptions(gw::Gateway) = gw.subscriptions
 _services(gw::Gateway) = String[]
 _agentsforservice(gw::Gateway, svc) = String[]
-_onclose(gw::Gateway) = close(gw.sock[])
+_onclose(gw::Gateway) = close(gw)
 _shutdown(gw::Gateway) = close(gw)
 _alive(gw::Gateway) = nothing
 
@@ -79,61 +102,64 @@ function _update_watch(gw)
     "action" => "wantsMessagesFor",
     "agentIDs" => watch
   ))
-  _println(gw.sock[], s)
+  _println(gw, s)
 end
 
 # task monitoring incoming JSON messages from master container
 function _run(gw)
-  try
-    _println(gw.sock[], "{\"alive\": true}")
-    _println(gw.sock[], "{\"action\": \"auth\", \"name\": \"$(name(gw))\"}")
-    _update_watch(gw)
-    while isopen(gw.sock[])
-      s = readline(gw.sock[])
-      @debug "<< $s"
-      json = JSON.parse(s)
-      if haskey(json, "id") && haskey(gw.pending, json["id"])
-        put!(gw.pending[json["id"]], json)
-      elseif haskey(json, "action")
-        if json["action"] == "agents"
-          _respond(gw, json, Dict("agentIDs" => _agents(gw)))
-        elseif json["action"] == "agentForService"
-          alist = _agentsforservice(gw, json["service"])
-          if length(alist) > 0
-            _respond(gw, json, Dict("agentID" => first(alist)))
-          else
-            _respond(gw, json, Dict())
-          end
-        elseif json["action"] == "agentsForService"
-          alist = _agentsforservice(gw, json["service"])
-          _respond(gw, json, Dict("agentIDs" => alist))
-        elseif json["action"] == "services"
-          _respond(gw, json, Dict("services" => _services(gw)))
-        elseif json["action"] == "containsAgent"
-          ans = (json["agentID"] ∈ _agents(gw))
-          _respond(gw, json, Dict("answer" => ans))
-        elseif json["action"] == "send"
-          rcpt = json["message"]["data"]["recipient"]
-          if rcpt ∈ _agents(gw) || rcpt ∈ _subscriptions(gw)
-            try
-              msg = _inflate(json["message"])
-              _deliver(gw, msg, json["relay"])
-            catch ex
-              @warn ex
+  while gw.sock[] !== nothing
+    try
+      _println(gw, "{\"alive\": true}")
+      _println(gw, "{\"action\": \"auth\", \"name\": \"$(name(gw))\"}")
+      _update_watch(gw)
+      while gw.sock[] !== nothing && isopen(gw.sock[])
+        s = readline(gw.sock[])
+        @debug "<< $s"
+        json = JSON.parse(s)
+        if haskey(json, "id") && haskey(gw.pending, json["id"])
+          put!(gw.pending[json["id"]], json)
+        elseif haskey(json, "action")
+          if json["action"] == "agents"
+            _respond(gw, json, Dict("agentIDs" => _agents(gw)))
+          elseif json["action"] == "agentForService"
+            alist = _agentsforservice(gw, json["service"])
+            if length(alist) > 0
+              _respond(gw, json, Dict("agentID" => first(alist)))
+            else
+              _respond(gw, json, Dict())
             end
+          elseif json["action"] == "agentsForService"
+            alist = _agentsforservice(gw, json["service"])
+            _respond(gw, json, Dict("agentIDs" => alist))
+          elseif json["action"] == "services"
+            _respond(gw, json, Dict("services" => _services(gw)))
+          elseif json["action"] == "containsAgent"
+            ans = (json["agentID"] ∈ _agents(gw))
+            _respond(gw, json, Dict("answer" => ans))
+          elseif json["action"] == "send"
+            rcpt = json["message"]["data"]["recipient"]
+            if rcpt ∈ _agents(gw) || rcpt ∈ _subscriptions(gw)
+              try
+                msg = _inflate(json["message"])
+                _deliver(gw, msg, json["relay"])
+              catch ex
+                @warn ex
+              end
+            end
+          elseif json["action"] == "shutdown"
+            _shutdown(gw)
           end
-        elseif json["action"] == "shutdown"
-          _shutdown(gw)
+        elseif haskey(json, "alive") && json["alive"]
+          _println(gw, "{\"alive\": true}")
+          _alive(gw)
         end
-      elseif haskey(json, "alive") && json["alive"]
-        _println(gw.sock[], "{\"alive\": true}")
-        _alive(gw)
+      end
+    catch ex
+      if !(ex isa ErrorException && startswith(ex.msg, "Unexpected end of input"))
+        @warn ex stacktrace(catch_backtrace())
       end
     end
-  catch ex
-    if !(ex isa ErrorException && startswith(ex.msg, "Unexpected end of input"))
-      @warn ex stacktrace(catch_backtrace())
-    end
+    gw.sock[] === nothing || sleep(1000)
   end
   _onclose(gw)
 end
@@ -175,8 +201,11 @@ end
 
 "Close a gateway connection to the master container."
 function Base.close(gw::Gateway)
-  _println(gw.sock[], "{\"alive\": false}")
-  Base.close(gw.sock[])
+  _println(gw, "{\"alive\": false}")
+  if gw.sock[] !== nothing
+    Base.close(gw.sock[])
+    gw.sock[] = nothing
+  end
   nothing
 end
 
@@ -267,7 +296,7 @@ function send(gw::Gateway, msg)
       "data" => msg.__data__
     )
   ))
-  _println(gw.sock[], json)
+  _println(gw, json)
   true
 end
 
