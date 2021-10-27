@@ -23,8 +23,14 @@ currenttimemillis(::Nothing) = Dates.value(now())
 nanotime(::Nothing) = Dates.value(now()) * 1000000
 delay(::Nothing, millis) = sleep(millis/1000)
 
-# requires JULIA_DEBUG environment variable to be setup correctly
+"""
+    loglevel!(level)
+
+Set log level. Supported levels include `:debug`, `:info`, `:warn`, `:error`, `:none`.
+The equivalent Julia `Logging.Debug`, `Logging.Info`, etc levels may also be used.
+"""
 function loglevel!(level)
+  # requires JULIA_DEBUG environment variable to be setup correctly
   (level === Logging.Debug || level === :debug) && return disable_logging(Logging.BelowMinLevel)
   (level === Logging.Info || level === :info) && return disable_logging(Logging.Debug)
   (level === Logging.Warn || level === :warn) && return disable_logging(Logging.Info)
@@ -48,6 +54,7 @@ end
 
 ### realtime platform
 
+"Real-time platform."
 Base.@kwdef struct RealTimePlatform <: Platform
   containers = Container[]
   running = Ref(false)
@@ -58,17 +65,60 @@ function Base.show(io::IO, p::RealTimePlatform)
   print(io, "RealTimePlatform[running=", p.running[], ", containers=", length(p.containers), "]")
 end
 
+"""
+    currenttimemillis(platform::Platform)
+
+Get current time in milliseconds for the platform.
+"""
 currenttimemillis(::RealTimePlatform) = Dates.value(now())
+
+"""
+    nanotime(platform::Platform)
+
+Get current time in nanoseconds for the platform.
+"""
 nanotime(::RealTimePlatform) = Dates.value(now()) * 1000000
+
+"""
+    delay(platform::Platform, millis)
+
+Sleep for millis ms on the platform.
+"""
 delay(::RealTimePlatform, millis) = sleep(millis/1000)
 
+"""
+    containers(platform::Platform)
+
+Get list of containers running on the platform.
+"""
 containers(p::RealTimePlatform) = p.containers
+
+"""
+    isrunning(platform::Platform)
+
+Check if platform is running.
+"""
 isrunning(p::RealTimePlatform) = p.running[]
 
+"""
+    isidle(platform::Platform)
+
+Check if platform is idle. Unimplemented. Currently always returns true.
+"""
 isidle(::RealTimePlatform) = true      # FIXME
 
+"""
+    buildversion(platform::Platform)
+
+Get build version of the platform.
+"""
 buildversion(::RealTimePlatform) = VERSION
 
+"""
+    add(platform::Platform, container::Container)
+
+Run a container on a platform.
+"""
 function add(p::RealTimePlatform, c::Container)
   platform(c) === p || throw(ArgumentError("Container bound to another platform"))
   push!(p.containers, c)
@@ -76,6 +126,11 @@ function add(p::RealTimePlatform, c::Container)
   nothing
 end
 
+"""
+    start(platform::Platform)
+
+Start the platform and all containers running on the platform.
+"""
 function start(p::RealTimePlatform)
   p.running[] && return p
   @debug "Starting RealTimePlatform..."
@@ -85,6 +140,11 @@ function start(p::RealTimePlatform)
   p
 end
 
+"""
+    shutdown(platform::Platform)
+
+Stop the platform and all containers running on the platform.
+"""
 function shutdown(p::RealTimePlatform)
   p.running[] || return
   @debug "Stopping RealTimePlatform..."
@@ -95,6 +155,12 @@ function shutdown(p::RealTimePlatform)
   nothing
 end
 
+"""
+    wait(platform::Platform)
+
+Wait for platform to finish running. Blocks until all containers running on
+the platform have shutdown.
+"""
 function Base.wait(p::RealTimePlatform)
   lock(p.term) do
     while isrunning(p)
@@ -105,6 +171,7 @@ end
 
 ### standalone & slave containers
 
+"Standalone container."
 struct StandaloneContainer{T <: Platform} <: Container
   name::Ref{String}
   platform::T
@@ -115,6 +182,7 @@ struct StandaloneContainer{T <: Platform} <: Container
   initing::Ref{Bool}
 end
 
+"Slave container."
 struct SlaveContainer{T <: Platform} <: Container
   name::Ref{String}
   platform::T
@@ -129,6 +197,14 @@ struct SlaveContainer{T <: Platform} <: Container
   port::Int
 end
 
+"""
+    Container()
+    Container(platform::Platform)
+    Container(platform::Platform, name)
+
+Create a standalone container running on a real-time platform (if unspecified).
+If a name is not specified, a unique name is randomly generated.
+"""
 function Container(p=RealTimePlatform(), name=string(uuid4()))
   c = StandaloneContainer(Ref(name), p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(),
     Dict{String,Set{AgentID}}(), Ref(false), Ref(false))
@@ -136,6 +212,16 @@ function Container(p=RealTimePlatform(), name=string(uuid4()))
   c
 end
 
+"""
+    SlaveContainer(host, port)
+    SlaveContainer(host, port, name)
+    SlaveContainer(platform::Platform, host, port)
+    SlaveContainer(platform::Platform, host, port, name)
+
+Create a slave container running on a real-time platform (if unspecified),
+optionally with a specified name. If a name is not specified, a unique name
+is randomly generated.
+"""
 SlaveContainer(host, port) = SlaveContainer(RealTimePlatform(), host, port)
 SlaveContainer(host, port, name) = SlaveContainer(RealTimePlatform(), host, port, name)
 
@@ -146,28 +232,96 @@ function SlaveContainer(p::Platform, host, port, name=string(uuid4()))
   c
 end
 
+"""
+    name(container::Container)
+
+Get name of the container.
+"""
 name(c::Container) = c.name[]
+
+"""
+    name!(container::Container, s)
+
+Set name of the container.
+"""
 name!(c::Container, s::String) = (c.name[] = s)
 
 function Base.show(io::IO, c::Container)
   print(io, typeof(c), "[name=\"", name(c), "\", running=", c.running[], ", agents=", length(c.agents), "]")
 end
 
+"""
+    platform(container::Container)
+
+Get platform on which the container is running.
+"""
 platform(c::Container) = c.platform
+
+"""
+    isrunning(container::Container)
+
+Check if the container is running.
+"""
 isrunning(c::Container) = c.running[]
+
+"""
+    state(container::Container)
+
+Get a human-readable state of the container.
+"""
 state(c::Container) = isrunning(c) ? "Running" : "Not running"
 
+"""
+    isidle(container::Container)
+
+Check if container is idle. Unimplemented. Currently always returns true.
+"""
 isidle(::Container) = true     # FIXME
 
+"""
+    autoclone(container::Container)
+
+Check if the container is configured to automatically clone messages on send.
+"""
 autoclone(::Container) = false
+
+"""
+    autoclone!(container::Container, b)
+
+Configure container to automatically clone (or not clone) messages on send. Currently
+auto-cloning is unimplemented, and so `b` can only be `false`.
+"""
 autoclone!(::Container, b::Bool) = b && throw(ArgumentError("autoclone not supported"))
 
+"""
+    addlistener(container::Container, listener)
+
+Add message listener to container. Unimplemented.
+"""
 addlistener(::Container, listener) = throw(ErrorException("Listeners not supported"))
+
+"""
+    removelistener(container::Container, listener)
+
+Remove message listener from container.
+"""
 removelistener(::Container, listener) = false
 
+"""
+    containsagent(container::Container, aid::AgentID)
+    containsagent(container::Container, name::String)
+
+Check if an agent is running in the container.
+"""
 containsagent(c::Container, aid::AgentID) = aid.name ∈ keys(c.agents)
 containsagent(c::Container, name::String) = name ∈ keys(c.agents)
 
+"""
+    canlocateagent(container::Container, aid::AgentID)
+    canlocateagent(container::Container, name::String)
+
+Check if an agent is running in the container, or in any of the remote containers.
+"""
 canlocateagent(c::StandaloneContainer, a) = containsagent(c, a)
 
 function canlocateagent(c::SlaveContainer, aid)
@@ -179,12 +333,36 @@ function canlocateagent(c::SlaveContainer, aid)
   false
 end
 
+"""
+    agent(container::Container, aid::AgentID)
+    agent(container::Container, name::String)
+
+Get the agent ID of an agent specified by name or its agent ID.
+"""
 agent(c::Container, name::String) = name ∈ keys(c.agents) ? c.agents[name] : nothing
 agent(c::Container, aid::AgentID) = agent(c, name(aid))
 
+"""
+    agents(container::Container)
+
+Get list of agents running in the container.
+"""
 agents(c::Container) = collect(values(c.agents))
+
+"""
+    services(container::Container)
+
+Get list of services running in the container.
+"""
 services(c::Container) = collect(keys(c.services))
 
+"""
+    add(container::Container, agent)
+    add(container::Container, name, agent)
+
+Run an agent in a container. If the name is not specified, a unique name is randomly
+generated.
+"""
 function add(c::Container, name::String, a::Agent)
   canlocateagent(c, name) && throw(ArgumentError("Duplicate agent name"))
   a._container = c
@@ -197,6 +375,13 @@ end
 
 add(c::Container, a::Agent) = add(c, string(typeof(a)) * "-" * string(uuid4())[1:8], a)
 
+"""
+    kill(container::Container, aid::AgentID)
+    kill(container::Container, name::String)
+    kill(container::Container, agent::Agent)
+
+Stop an agent running in a container.
+"""
 function Base.kill(c::Container, aid::String)
   containsagent(c, aid) || return false
   a = c.agents[aid]
@@ -217,6 +402,11 @@ end
 Base.kill(c::Container, aid::AgentID) = kill(c, aid.name)
 Base.kill(c::Container, a::Agent) = kill(c, AgentID(a))
 
+"""
+    start(container::Container)
+
+Start a container.
+"""
 function start(c::StandaloneContainer)
   c.running[] && return c
   if !isrunning(c.platform)
@@ -268,6 +458,11 @@ function _alive(c::SlaveContainer)
   end
 end
 
+"""
+    shutdown(container::Container)
+
+Stop a container and all agents running in it.
+"""
 function shutdown(c::StandaloneContainer)
   c.running[] || return
   @debug "Stopping StandaloneContainer..."
