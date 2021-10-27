@@ -1,5 +1,5 @@
 ![](https://github.com/org-arl/Fjage.jl/workflows/CI/badge.svg)<br>
-_fjåge v1.7.0_
+_fjåge v1.10.0-SNAPSHOT_
 
 # Fjåge Julia gateway
 

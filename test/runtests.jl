@@ -61,7 +61,7 @@ try
 
     @testset "send & receive (gw)" begin
       flush(gw)
-      send(gw, ShellExecReq(recipient=shell, cmd="ps"))
+      send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
       rsp = receive(gw, 1000)
       @test typeof(rsp) <: Message
       @test rsp.performative == "AGREE"
@@ -69,7 +69,7 @@ try
 
     @testset "send & receive (aid)" begin
       flush(gw)
-      send(shell, ShellExecReq(cmd="ps"))
+      send(shell, ShellExecReq(cmd="1+2"))
       rsp = receive(gw, 1000)
       @test typeof(rsp) <: Message
       @test rsp.performative == "AGREE"
@@ -77,21 +77,21 @@ try
 
     @testset "request (gw)" begin
       flush(gw)
-      rsp = request(gw, ShellExecReq(recipient=shell, cmd="ps"))
+      rsp = request(gw, ShellExecReq(recipient=shell, cmd="1+2"))
       @test typeof(rsp) <: Message
       @test rsp.performative == "AGREE"
     end
 
     @testset "request (aid)" begin
       flush(gw)
-      rsp = request(shell, ShellExecReq(cmd="ps"))
+      rsp = request(shell, ShellExecReq(cmd="1+2"))
       @test typeof(rsp) <: Message
       @test rsp.performative == "AGREE"
     end
 
     @testset "<< (aid, +)" begin
       flush(gw)
-      rsp = shell << ShellExecReq(cmd="ps")
+      rsp = shell << ShellExecReq(cmd="1+2")
       @test typeof(rsp) <: Message
       @test rsp.performative == "AGREE"
     end
@@ -102,13 +102,13 @@ try
     end
 
     @testset "<< (aid, -)" begin
-      rsp = dummy << ShellExecReq(cmd="ps")
+      rsp = dummy << ShellExecReq(cmd="1+2")
       @test rsp == nothing
     end
 
     @testset "flush" begin
       flush(gw)
-      send(gw, ShellExecReq(recipient=shell, cmd="ps"))
+      send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
       sleep(1)
       flush(gw)
       rsp = receive(gw, 1000)
@@ -122,7 +122,7 @@ try
 
     @testset "subscribe (-)" begin
       flush(gw)
-      send(ntf, ShellExecReq(cmd="ps"))
+      send(ntf, ShellExecReq(cmd="1+2"))
       msg = receive(gw, 1000)
       @test msg == nothing
     end
@@ -130,14 +130,14 @@ try
     @testset "subscribe (+)" begin
       flush(gw)
       subscribe(gw, ntf)
-      send(ntf, ShellExecReq(cmd="ps"))
+      send(ntf, ShellExecReq(cmd="1+2"))
       msg = receive(gw, 1000)
       @test typeof(msg) <: ShellExecReq
     end
 
     @testset "receive (filt, +)" begin
       flush(gw)
-      send(ntf, ShellExecReq(cmd="ps"))
+      send(ntf, ShellExecReq(cmd="1+2"))
       msg = receive(gw, ShellExecReq, 1000)
       @test typeof(msg) <: ShellExecReq
     end
@@ -145,7 +145,7 @@ try
     UnknownReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.UnknownReq")
     @testset "receive (filt, -)" begin
       flush(gw)
-      send(ntf, ShellExecReq(cmd="ps"))
+      send(ntf, ShellExecReq(cmd="1+2"))
       msg = receive(gw, UnknownReq, 1000)
       @test msg == nothing
     end
@@ -153,7 +153,7 @@ try
     @testset "unsubscribe" begin
       unsubscribe(gw, ntf)
       flush(gw)
-      send(ntf, ShellExecReq(cmd="ps"))
+      send(ntf, ShellExecReq(cmd="1+2"))
       msg = receive(gw, 1000)
       @test msg == nothing
     end

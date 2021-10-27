@@ -4,7 +4,7 @@ import org.arl.fjage.remote.*
 import org.arl.fjage.shell.*
 import org.arl.fjage.connectors.*
 
-// Logger.getLogger("org.arl.fjage.remote").setLevel(Level.FINEST)
+Logger.getLogger("org.arl.fjage.remote").setLevel(Level.FINEST)
 
 platform = new RealTimePlatform()
 container = new MasterContainer(platform, 5081)
