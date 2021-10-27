@@ -2,3 +2,4 @@ test/lib
 test/logs
 Manifest.toml
 TODO
+*.todo
