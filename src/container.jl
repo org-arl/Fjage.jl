@@ -23,7 +23,7 @@ currenttimemillis(::Nothing) = Dates.value(now())
 nanotime(::Nothing) = Dates.value(now()) * 1000000
 delay(::Nothing, millis) = sleep(millis/1000)
 
-# FIXME: debug requires JULIA_DEBUG environment variable to be setup correctly
+# requires JULIA_DEBUG environment variable to be setup correctly
 function loglevel!(level)
   (level === Logging.Debug || level === :debug) && return disable_logging(Logging.BelowMinLevel)
   (level === Logging.Info || level === :info) && return disable_logging(Logging.Debug)
@@ -159,11 +159,9 @@ state(c::Container) = isrunning(c) ? "Running" : "Not running"
 
 isidle(::Container) = true     # FIXME
 
-# TODO: support autoclone
 autoclone(::Container) = false
 autoclone!(::Container, b::Bool) = b && throw(ArgumentError("autoclone not supported"))
 
-# TODO: support listeners
 addlistener(::Container, listener) = throw(ErrorException("Listeners not supported"))
 removelistener(::Container, listener) = false
 
@@ -539,10 +537,8 @@ deregister(a::Agent, svc::String) = deregister(container(a), AgentID(a), svc)
 agentforservice(a::Agent, svc::String) = agentforservice(container(a), svc, a)
 agentsforservice(a::Agent, svc::String) = agentsforservice(container(a), svc, a)
 
-# TODO: add support for persistent store
 store(::Agent) = throw(ErrorException("Persistent store not supported"))
 
-# TODO: support changeable queue size
 function queuesize!(::Agent, n)
   n == MAX_QUEUE_LEN && return nothing
   throw(ArgumentError("Changing queuesize is not supported (queuesize = $MAX_QUEUE_LEN)"))
