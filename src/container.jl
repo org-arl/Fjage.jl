@@ -1259,17 +1259,25 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
         end
       else # set
         if ndx < 0
+          isro = false
           x = _set(a, p, v)
-          (x === missing || x === nothing) && (x = _get(a, p))
+          if x === missing || x === nothing
+            x, isro = _get(a, p)
+          end
           if x !== missing && x !== nothing
             push!(rsp, q => x)
+            isro && push!(ro, q)
             onparamchange(a, b, q, ndx, x)
           end
         else
+          isro = false
           x = _set(a, p, ndx, v)
-          (x === missing || x === nothing) && (x = _get(a, p, ndx))
+          if x === missing || x === nothing
+            x, isro = _get(a, p, ndx)
+          end
           if x !== missing && x !== nothing
             push!(rsp, q => x)
+            isro && push!(ro, q)
             onparamchange(a, b, q, ndx, x)
           end
         end
