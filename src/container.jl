@@ -698,7 +698,7 @@ function stop(a::Agent)
 end
 
 function die(a::Agent, msg)
-  @error msg
+  @error "Agent $(AgentID(a)) died: $(msg)"
   stop(a)
 end
 
@@ -1134,6 +1134,8 @@ Fjage.get(a::Agent, ::Val{:type}) = string(typeof(a))
 Fjage.get(a::Agent, ::Val{:title}) = string(AgentID(a))
 Fjage.get(a::Agent, ::Val{:description}) = ""
 
+onparamchange(a::Agent, b::Behavior, p, ndx, v) = nothing
+
 function set end
 function isreadonly end
 function isunlisted end
@@ -1259,11 +1261,17 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
         if ndx < 0
           x = _set(a, p, v)
           (x === missing || x === nothing) && (x = _get(a, p))
-          x === missing || x === nothing || push!(rsp, q => x)
+          if x !== missing && x !== nothing
+            push!(rsp, q => x)
+            onparamchange(a, b, q, ndx, x)
+          end
         else
           x = _set(a, p, ndx, v)
           (x === missing || x === nothing) && (x = _get(a, p, ndx))
-          x === missing || x === nothing || push!(rsp, q => x)
+          if x !== missing && x !== nothing
+            push!(rsp, q => x)
+            onparamchange(a, b, q, ndx, x)
+          end
         end
       end
     catch ex
