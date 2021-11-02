@@ -235,8 +235,11 @@ Create a message with just a performative (`perf`) and no data. If the performat
 is not specified, it defaults to INFORM. If the inreplyto is specified, the message
 `inReplyTo` and `recipient` fields are set accordingly.
 """
-Message(perf::String=Performative.INFORM) = GenericMessage(perf=perf)
-Message(inreplyto::Message, perf::String=Performative.INFORM) = GenericMessage(perf=perf, inReplyTo=inreplyto.msgID, recipient=inreplyto.sender)
+Message(perf::String=Performative.INFORM) = _Message(perf=perf)
+Message(inreplyto::Message, perf::String=Performative.INFORM) = _Message(perf=perf, inReplyTo=inreplyto.msgID, recipient=inreplyto.sender)
+
+# message base class
+_Message = MessageClass(@__MODULE__, "org.arl.fjage.Message")
 
 # convenience methods and pretty printing for parameters
 
