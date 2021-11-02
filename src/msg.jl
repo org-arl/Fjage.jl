@@ -20,7 +20,7 @@ module Performative
 end
 
 "Base class for messages transmitted by one agent to another."
-abstract type Message end
+abstract type Message <: AbstractDict{Symbol,Any} end
 
 """
     mtype = MessageClass(context, clazz[, superclass[, performative]])
@@ -152,10 +152,30 @@ function Base.getproperty(s::Message, p::Symbol)
   end
 end
 
+# immutable dictionary interface for Messages
+
 function Base.get(s::Message, p::Symbol, default)
   v = getproperty(s, p)
   v === nothing && return default
   v
+end
+
+Base.getindex(s::Message, p::Symbol) = getproperty(s, p)
+Base.keys(s::Message) = Symbol.(keys(getfield(s, :data)))
+Base.values(s::Message) = values(getfield(s, :data))
+Base.eltype(s::Message) = Pair{Symbol,Any}
+Base.length(s::Message) = length(getfield(s, :data))
+
+function Base.iterate(s::Message)
+  it = iterate(getfield(s, :data))
+  it === nothing && return nothing
+  (Symbol(it[1][1]) => it[1][2], it[2])
+end
+
+function Base.iterate(s::Message, state)
+  it = iterate(getfield(s, :data), state)
+  it === nothing && return nothing
+  (Symbol(it[1][1]) => it[1][2], it[2])
 end
 
 # adds notation message.field
