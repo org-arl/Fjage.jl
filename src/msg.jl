@@ -152,6 +152,12 @@ function Base.getproperty(s::Message, p::Symbol)
   end
 end
 
+function Base.get(s::Message, p::Symbol, default)
+  v = getproperty(s, p)
+  v === nothing && return default
+  v
+end
+
 # adds notation message.field
 function Base.setproperty!(s::Message, p::Symbol, v)
   (p == :__clazz__ || p == :__data__) && throw(ArgumentError("read-only property cannot be set"))
