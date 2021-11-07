@@ -496,12 +496,22 @@ end
 _onclose(c::SlaveContainer) = shutdown(c)
 _shutdown(c::SlaveContainer) = shutdown(platform(c))
 
+"""
+    subscribe(c::Container, topic::AgentID, agent::Agent)
+
+Subscribe `agent` running in container `c` to `topic`.
+"""
 function subscribe(c::StandaloneContainer, t::AgentID, a::Agent)
   t ∈ keys(c.topics) || (c.topics[t] = Set{Agent}())
   push!(c.topics[t], a)
   true
 end
 
+"""
+    unsubscribe(c::Container, topic::AgentID, agent::Agent)
+
+Unsubscribe `agent` running in container `c` from `topic`.
+"""
 function unsubscribe(c::StandaloneContainer, a::Agent)
   foreach(t -> delete!(c.topics[t], a), keys(c.topics))
   nothing
@@ -521,6 +531,11 @@ function subscribe(c::SlaveContainer, t::AgentID, a::Agent)
   true
 end
 
+"""
+    unsubscribe(c::Container, agent::Agent)
+
+Unsubscribe `agent` running in container `c` from all topics.
+"""
 function unsubscribe(c::SlaveContainer, a::Agent)
   foreach(t -> delete!(c.topics[t], a), keys(c.topics))
   _update_watch(c)
@@ -535,28 +550,55 @@ function unsubscribe(c::SlaveContainer, t::AgentID, a::Agent)
   true
 end
 
+"""
+    register(c::Container, aid::AgentID, svc::String)
+
+Register agent `aid` as providing service `svc`.
+"""
 function register(c::Container, aid::AgentID, svc::String)
   svc ∈ keys(c.services) || (c.services[svc] = Set{AgentID}())
   push!(c.services[svc], aid)
   true
 end
 
+"""
+    deregister(c::Container, aid::AgentID)
+
+Deregister agent `aid` from providing any services.
+"""
 function deregister(c::Container, aid::AgentID)
   foreach(svc -> delete!(c.services[svc], aid), keys(c.services))
   nothing
 end
 
+"""
+    deregister(c::Container, aid::AgentID, svc::String)
+
+Deregister agent `aid` from providing service `svc`.
+"""
 function deregister(c::Container, aid::AgentID, svc::String)
   svc ∈ keys(c.services) || return false
   delete!(c.services[svc], aid)
   true
 end
 
+"""
+    agentforservice(c::Container, svc::String, owner::AgentID)
+
+Lookup any agent providing the service `svc`, and return an `AgentID` owned
+by `owner`. Returns `nothing` if no agent providing specified service found.
+"""
 function agentforservice(c::StandaloneContainer, svc::String, owner::AgentID)
   svc ∈ keys(c.services) || return nothing
   AgentID(first(c.services[svc]).name, false, owner)
 end
 
+"""
+    agentsforservice(c::Container, svc::String, owner::AgentID)
+
+Lookup all agents providing the service `svc`, and return list of `AgentID` owned
+by `owner`. Returns an empty list if no agent providing specified service found.
+"""
 function agentsforservice(c::StandaloneContainer, svc::String, owner::AgentID)
   svc ∈ keys(c.services) || return AgentID[]
   [AgentID(s.name, false, owner) for s ∈ c.services[svc]]
@@ -574,9 +616,22 @@ function agentsforservice(c::SlaveContainer, svc::String, owner::Agent)
   [AgentID(a, false, owner) for a in rsp["agentIDs"]]
 end
 
+"""
+    send(c::Container, msg)
+
+Send message `msg` to recipient specified in the message. Return `true` if the
+message is accepted for delivery, `false` otherwise.
+"""
 send(c::Container, msg) = _deliver(c, msg, true)
 send(c::Container, msg, relay) = _deliver(c, msg, relay)
 
+"""
+    ps(c::Container)
+
+Get a list of agents running in a container. The list contains tuples of agent
+name and agent type. The agent type may be `nothing` for agents running in
+remote containers, if the containers do not support type query.
+"""
 ps(c::StandaloneContainer) = collect((kv[1], typeof(kv[2])) for kv ∈ c.agents)
 
 function ps(c::SlaveContainer)
@@ -642,6 +697,32 @@ _deliver(c::SlaveContainer, msg::Message) = _deliver(c, msg, true)
 
 ### agent
 
+"""
+The `@agent` macro is used to define a Fjage agent. The macro takes in a `struct`
+definition and converts it into an agent definition. The fields in the struct are
+treated as agent attributes. Fjage agent types are subtypes of `Fjage.Agent`
+and are mutable.
+
+The `struct` definition may include initialization, as supported by the
+`Base.@kwdef` macro.
+
+# Examples:
+```julia
+using Fjage
+
+@agent struct MyAgent
+  field1::Int = 1
+  field2::String = "hello"
+end
+
+abstract type SpecialAgent <: Fjage.Agent end
+
+@agent struct MySpecialAgent <: SpecialAgent
+  agentnumber::Int = 007
+  licensedtokill::Bool = true
+end
+```
+"""
 macro agent(sdef)
   if @capture(sdef, struct T_ <: P_ fields__ end)
     push!(fields, :(_aid::Union{AgentID,Nothing} = nothing))
@@ -664,6 +745,27 @@ end
 
 Base.show(io::IO, a::Agent) = print(io, typeof(a), "(", something(AgentID(a), "-"), ")")
 
+"""
+    init(a::Agent)
+
+Initialization function for an agent. The default implementation calls `setup(a)`,
+and adds a `ParameterMessageBehavior` to support agent parameters, a
+`MessageBehavior` that calls `processrequest(a, msg)` for REQUEST messages or
+`processmessage(a, msg)` for all other messages, and a `OneShotBehavior` that
+calls `startup(a)` once the agent is running. An agent may provide a method
+if these default behaviors are desired.
+
+# Examples:
+```julia
+using Fjage
+
+@agent struct MyBareAgent end
+
+function Fjage.init(a::MyBareAgent)
+  @info "Agent $(AgentID(a)) init"
+end
+```
+"""
 function init(a::Agent)
   @debug "Agent $(AgentID(a)) init"
   setup(a)
@@ -683,34 +785,196 @@ function init(a::Agent)
   end)
 end
 
+
+@doc """
+    setup(a::Agent)
+
+Unless an agent overrides its `init(a)` function, the default behavior for an agent
+is to call `setup(a)` during initialization, and `startup(a)` once the agent
+is running. Typically, the `setup(a)` function is used to register services, and
+the `startup(a)` function is used to lookup services from other agents. Behaviors
+may be added in either of the functions.
+
+# Examples:
+```julia
+using Fjage
+
+@agent struct MyAgent end
+
+function Fjage.setup(a::MyAgent)
+  @info "Agent $(AgentID(a)) setting up"
+end
+
+function Fjage.startup(a::MyAgent)
+  @info "Agent $(AgentID(a)) started"
+end
+```
+""" setup
+@doc (@doc setup) startup
+
 setup(a::Agent) = nothing
 startup(a::Agent) = nothing
+
+"""
+    processrequest(a::Agent, req)
+
+Unless an agent overrides its `init(a)` function, the default behavior for an agent
+is to add a `MessageBehavior` that calls `processrequest(a, req)` when it
+receives any message with a performative `REQUEST`. The return value of the
+function must be either `nothing` or a response message. If a response message
+is returned, it is sent. If `nothing` is returned, a default response with
+performative `NOT_UNDERSTOOD` is sent back. An agent may provide methods to
+handle specific messages. For unhandled requests, the default implementation
+just returns a `nothing`.
+
+# Examples:
+```julia
+using Fjage
+
+const MySpecialReq = MessageClass(@__MODULE__, "MySpecialReq", nothing, Performative.REQUEST)
+
+@agent struct MyAgent end
+
+function Fjage.processrequest(a::MyAgent, req::MySpecialReq)
+  # do something useful with the request here...
+  # and return an AGREE response
+  Message(req, Performative.AGREE)
+end
+```
+"""
 processrequest(a::Agent, req) = nothing
+
+"""
+    processmessage(a::Agent, msg)
+
+Unless an agent overrides its `init(a)` function, the default behavior for an agent
+is to add a `MessageBehavior` that calls `processmessage(a, msg)` when it
+receives any message (with the exception of messages with performative `REQUEST`,
+for which `processrequest(a, msg)` is called instead). An agent may provide methods to
+handle specific messages.
+
+# Examples:
+```julia
+using Fjage
+
+const MySpecialNtf = MessageClass(@__MODULE__, "MySpecialNtf")
+
+@agent struct MyAgent end
+
+function Fjage.processmessage(a::MyAgent, msg::MySpecialNtf)
+  # do something useful with the message here...
+end
+```
+"""
 processmessage(a::Agent, msg) = nothing
 
+"""
+    shutdown(a::Agent)
+
+This function is called when an agent terminates. An agent may provide a
+method to handle termination, if desired.
+
+# Examples:
+```julia
+using Fjage
+
+@agent struct MyAgent end
+
+function Fjage.shutdown(a::MyAgent)
+  @info "Agent $(AgentID(a)) shutting down"
+end
+```
+"""
 function shutdown(a::Agent)
   @debug "Agent $(AgentID(a)) terminated"
 end
 
+"""
+    stop(a::Agent)
+    stop(a::Agent, msg)
+
+Terminates an agent, optionally with an error message to be logged, explaining
+the reason for termination.
+
+  # Examples:
+```julia
+using Fjage
+
+@agent struct MyAgent
+  criticalagent::Union{AgentID,Nothing} = nothing
+end
+
+function Fjage.startup(a::MyAgent)
+  a.criticalagent = agentforservice("CriticalService")
+  a.criticalagent === nothing && return stop(a, "Could not find an agent providing CriticalService")
+  @info "MyAgent up and running"
+end
+```
+"""
 function stop(a::Agent)
   kill(container(a), a)
   nothing
 end
 
-function die(a::Agent, msg)
+function stop(a::Agent, msg)
   @error "Agent $(AgentID(a)) died: $(msg)"
   stop(a)
 end
 
+"""
+    platform(a::Agent)
+
+Get platform on which the agent's container is running.
+"""
 platform(a::Agent) = platform(container(a))
+
+"""
+    container(a::Agent)
+
+Get container in which the agent is running.
+"""
 container(a::Agent) = a._container
+
+"""
+    AgentID(a::Agent)
+
+Get the `AgentID` of the agent.
+"""
 AgentID(a::Agent) = a._aid
+
+"""
+    name(a::Agent)
+
+Get the name of the agent.
+"""
 name(a::Agent) = name(a._aid)
 
+"""
+    agent(a::Agent, name::String)
+
+Generate an owned `AgentID` for an agent with the given name.
+"""
 agent(a::Agent, name::String) = AgentID(name, false, a)
 
+"""
+    currenttimemillis(a::Agent)
+
+Get current time in milliseconds for the agent.
+"""
 currenttimemillis(a::Agent) = currenttimemillis(platform(a))
+
+"""
+    nanotime(a::Agent)
+
+Get current time in nanoseconds for the agent.
+"""
 nanotime(a::Agent) = nanotime(platform(a))
+
+"""
+    delay(a::Agent, millis)
+
+Delay the execution of the agent by `millis` milliseconds.
+"""
 delay(a::Agent, millis) = delay(platform(a), millis)
 
 # FIXME: support agent-specific log levels
@@ -724,21 +988,73 @@ function state(a::Agent)
   :none
 end
 
+"""
+    subscribe(a::Agent, topic::AgentID)
+
+Subscribe agent to specified topic.
+"""
 subscribe(a::Agent, t::AgentID) = subscribe(container(a), t, a)
+
+"""
+    unsubscribe(a::Agent, topic::AgentID)
+
+Unsubscribe agent from specified topic.
+"""
 unsubscribe(a::Agent, t::AgentID) = unsubscribe(container(a), t, a)
 
+"""
+    register(a::Agent, svc::String)
+
+Register agent as providing a specied service.
+"""
 register(a::Agent, svc::String) = register(container(a), AgentID(a), svc)
+
+"""
+    deregister(a::Agent, svc::String)
+
+Deregister agent from providing a specied service.
+"""
 deregister(a::Agent, svc::String) = deregister(container(a), AgentID(a), svc)
+
+"""
+    agentforservice(a::Agent, svc::String)
+
+Find an agent providing a specified service. Returns an owned `AgentID` for the
+service provider, if one is found, `nothing` otherwise.
+"""
 agentforservice(a::Agent, svc::String) = agentforservice(container(a), svc, a)
+
+"""
+    agentsforservice(a::Agent, svc::String)
+
+Get a list of agents providing a specified service. Returns a list of owned
+`AgentID` for the service providers. The list may be empty if no service providers
+are found.
+"""
 agentsforservice(a::Agent, svc::String) = agentsforservice(container(a), svc, a)
 
+"""
+    store(a::Agent)
+
+Return the persistent data store for agent. Currently unimplemented.
+"""
 store(::Agent) = throw(ErrorException("Persistent store not supported"))
 
+"""
+    queuesize!(a::Agent, n)
+
+Set the incoming message queue size for an agent. Currently unimplemented.
+"""
 function queuesize!(::Agent, n)
   n == MAX_QUEUE_LEN && return nothing
   throw(ArgumentError("Changing queuesize is not supported (queuesize = $MAX_QUEUE_LEN)"))
 end
 
+"""
+    send(a::Agent, msg::Message)
+
+Send a message from agent `a`.
+"""
 function send(a::Agent, msg::Message)
   @debug "sending $(msg)"
   msg.sender = AgentID(a)
@@ -746,8 +1062,30 @@ function send(a::Agent, msg::Message)
   _deliver(container(a), msg)
 end
 
+"""
+    platformsend(a::Agent, msg::Message)
+
+Send a message to agents running on all containers on a platform. Currently
+unimplemented.
+"""
 platformsend(::Agent, msg::Message) = throw(ErrorException("platformsend() not supported"))
 
+"""
+    receive(a::Agent, timeout::Int=0; priority)
+    receive(a::Agent, filt, timeout::Int=0; priority)
+
+Receive a message, optionally matching the specified filter. The call blocks for
+at most `timeout` milliseconds, if a message is not available. If multiple
+`receive()` calls are concurrently active, the `priority` determines which call
+gets the message. Only one of the active `receive()` calls will receive the message.
+Returns a message or `nothing`.
+
+If a filter `filt` is specified, only messages matching the filter trigger
+this behavior. A filter may be a message class or a function that takes the
+message as an argument and returns `true` to accept, `false` to reject.
+
+Lower priority numbers indicate a higher priority.
+"""
 function receive(a::Agent, filt, timeout::Int=0; priority=(filt===nothing ? 0 : -100))
   (container(a) === nothing || !isrunning(container(a))) && return nothing
   for (n, msg) ∈ enumerate(a._msgqueue)
@@ -773,6 +1111,14 @@ end
 
 receive(a::Agent, timeout::Int=0) = receive(a, nothing, timeout)
 
+"""
+    request(a::Agent, msg::Message)
+    request(a::Agent, msg::Message, timeout::Int)
+
+Send a request and wait for a response. If a timeout is specified, the call blocks
+for at most `timeout` milliseconds. If no timeout is specified, a system default
+is used. Returns the response message or `nothing` if no response received.
+"""
 function request(a::Agent, msg::Message, timeout::Int=timeout[])
   timeout == 0 && throw(ArgumentError("request must use a non-zero timeout"))
   (container(a) === nothing || !isrunning(container(a))) && return nothing
@@ -791,6 +1137,11 @@ function request(a::Agent, msg::Message, timeout::Int=timeout[])
   msg
 end
 
+"""
+    flush(a::Agent)
+
+Flush agent's incoming message queue.
+"""
 Base.flush(a::Agent) = empty!(a._msgqueue)
 
 function _listen(a::Agent, ch::Channel, filt, priority::Int)
@@ -836,6 +1187,11 @@ end
 
 Base.show(io::IO, b::Behavior) = print(io, typeof(b), "/", name(b.agent))
 
+"""
+    add(a::Agent, b::Behavior)
+
+Add a behavior to an agent.
+"""
 function add(a::Agent, b::Behavior)
   (b.agent === nothing && b.done == false) || throw(ArgumentError("Behavior already running"))
   c = container(a)
@@ -847,11 +1203,42 @@ function add(a::Agent, b::Behavior)
   b
 end
 
+"""
+    agent(b::Behavior)
+
+Get the agent owning the behavior.
+"""
 agent(b::Behavior) = b.agent
+
+"""
+    done(b::Behavior)
+
+Check if a behavior is completed.
+"""
 done(b::Behavior) = b.done
+
+"""
+    priority(b::Behavior)
+
+Get the priority associated with a behavior.
+"""
 priority(b::Behavior) = b.priority
+
+"""
+    isblocked(b::Behavior)
+
+Check if a behavior is currently blocked.
+"""
 isblocked(b::Behavior) = b.block !== nothing
 
+"""
+    block(b::Behavior)
+    block(b::Behavior, millis)
+
+Marks a behavior as blocked, and prevents it from running until it is restarted
+using `restart(b)`. If `millis` is specified, the behavior is automatically
+restarted after `millis` milliseconds.
+"""
 function block(b::Behavior)
   b.done && return
   b.block = Condition()
@@ -873,6 +1260,11 @@ function block(b::Behavior, millis)
   nothing
 end
 
+"""
+    restart(b::Behavior)
+
+Restart a blocked behavior, previous blocked by `block(b)`.
+"""
 function restart(b::Behavior)
   b.block === nothing && return
   if b.timer !== nothing
@@ -885,6 +1277,12 @@ function restart(b::Behavior)
   nothing
 end
 
+"""
+    reset(b::Behavior)
+
+Resets a behavior, removing it from an agent running it. Once a behavior is
+reset, it may be reused later by adding it to an agent.
+"""
 function reset(b::Behavior)
   b.agent === nothing || delete!(b.agent._behaviors, b)
   b.agent = nothing
@@ -894,11 +1292,25 @@ end
 
 Base.reset(b::Behavior) = reset(b)
 
+"""
+    stop(b::Behavior)
+
+Terminates a behavior.
+"""
 function stop(b::Behavior)
   b.done = true
   restart(b)
   nothing
 end
+
+"""
+    action(b::Behavior)
+
+The action function for a behavior is repeatedly called when a behavior runs.
+Typically, each type of `Behavior` provides an `action` method that implements
+its intended behavior.
+"""
+function action end
 
 mutable struct OneShotBehavior <: Behavior
   agent::Union{Nothing,Agent}
@@ -911,6 +1323,28 @@ mutable struct OneShotBehavior <: Behavior
   onend::Union{Nothing,Function}
 end
 
+"""
+    OneShotBehavior(action)
+
+Create a one-shot behavior that runs exactly once at the earliest available
+opportunity. The `action(a::Agent, b::Behavior)` function is called when the
+behavior runs. The `onstart` and `onend` fields in the behavior may be set
+to functions that are called when the behavior is initialized and terminates.
+Both functions are called with similar parameters as `action`.
+
+# Examples:
+```julia
+using Fjage
+
+@agent struct MyAgent end
+
+function Fjage.startup(a::MyAgent)
+  add(a, OneShotBehavior() do a, b
+    @info "OneShotBehavior for agent $(AgentID(a)) just ran"
+  end)
+end
+```
+"""
 OneShotBehavior(action) = OneShotBehavior(nothing, nothing, nothing, false, 0, nothing, action, nothing)
 
 function action(b::OneShotBehavior)
@@ -938,6 +1372,31 @@ mutable struct CyclicBehavior <: Behavior
   onend::Union{Nothing,Function}
 end
 
+"""
+    CyclicBehavior(action)
+
+Create a cyclic behavior that runs repeatedly at the earliest available
+opportunity. The `action(a::Agent, b::Behavior)` function is called when the
+behavior runs. The `onstart` and `onend` fields in the behavior may be set
+to functions that are called when the behavior is initialized and terminates.
+Both functions are called with similar parameters as `action`.
+
+The running of cyclic behaviors may be controlled using `block(b)`, `restart(b)`
+and `stop(b)`.
+
+# Examples:
+```julia
+using Fjage
+
+@agent struct MyAgent end
+
+function Fjage.startup(a::MyAgent)
+  add(a, CyclicBehavior() do a, b
+    @info "CyclicBehavior for agent $(AgentID(a)) running..."
+  end)
+end
+```
+"""
 CyclicBehavior(action) = CyclicBehavior(nothing, nothing, nothing, false, 0, nothing, action, nothing)
 
 function action(b::CyclicBehavior)
@@ -976,7 +1435,61 @@ mutable struct WakerBehavior <: Behavior
   onend::Union{Nothing,Function}
 end
 
+"""
+    WakerBehavior(action, millis)
+
+Create a behavior that runs exactly once after `millis` milliseconds.
+The `action(a::Agent, b::Behavior)` function is called when the
+behavior runs. The `onstart` and `onend` fields in the behavior may be set
+to functions that are called when the behavior is initialized and terminates.
+Both functions are called with similar parameters as `action`.
+
+# Examples:
+```julia
+using Fjage
+
+@agent struct MyAgent end
+
+function Fjage.startup(a::MyAgent)
+  add(a, WakerBehavior(5000) do a, b
+    @info "Awake after 5 seconds!"
+  end)
+end
+```
+"""
 WakerBehavior(action, millis::Int64) = WakerBehavior(nothing, millis, nothing, nothing, false, 0, nothing, action, nothing)
+
+"""
+    BackoffBehavior(action, millis)
+
+Create a behavior that runs after `millis` milliseconds. The
+`action(a::Agent, b::Behavior)` function is called when the
+behavior runs. The behavior may be scheduled to re-run in `t` milliseconds
+by calling `backoff(b, t)`.
+
+The `onstart` and `onend` fields in the behavior may be set to functions that
+are called when the behavior is initialized and terminates. Both functions are
+called with similar parameters as `action`.
+
+The `BackoffBehavior` constructor is simply syntactic sugar for a `WakerBehavior`
+that is intended to be rescheduled often using `backoff()`.
+
+# Examples:
+```julia
+using Fjage
+
+@agent struct MyAgent end
+
+function Fjage.startup(a::MyAgent)
+  # a behavior that will run for the first time in 5 seconds, and subsequently
+  # every 2 seconds
+  add(a, BackoffBehavior(5000) do a, b
+    @info "Backoff!"
+    backoff(b, 2000)
+  end)
+end
+```
+"""
 BackoffBehavior(action, millis::Int64) = WakerBehavior(nothing, millis, nothing, nothing, false, 0, nothing, action, nothing)
 
 function action(b::WakerBehavior)
@@ -999,6 +1512,11 @@ function action(b::WakerBehavior)
   b.agent = nothing
 end
 
+"""
+    backoff(b::WakerBehavior, millis)
+
+Schedule the behavior to re-run in `millis` milliseconds.
+"""
 function backoff(b::WakerBehavior, millis::Int64)
   b.done = false
   b.millis = millis
@@ -1017,8 +1535,36 @@ mutable struct TickerBehavior <: Behavior
   ticks::Int64
 end
 
+"""
+    TickerBehavior(action, millis)
+
+Create a behavior that runs periodically every `millis` milliseconds.
+The `action(a::Agent, b::Behavior)` function is called when the
+behavior runs. The `onstart` and `onend` fields in the behavior may be set
+to functions that are called when the behavior is initialized and terminates.
+Both functions are called with similar parameters as `action`.
+
+# Examples:
+```julia
+using Fjage
+
+@agent struct MyAgent end
+
+function Fjage.startup(a::MyAgent)
+  add(a, TickerBehavior(5000) do a, b
+    @info "Tick!"
+  end)
+end
+```
+"""
 TickerBehavior(action, millis::Int64) = TickerBehavior(nothing, millis, nothing, nothing, false, 0, nothing, action, nothing, 0)
 
+"""
+    tickcount(b::TickerBehavior)
+
+Get the number of times a `TickerBehavior` has ticked (its `action()` has been
+called).
+"""
 tickcount(b::TickerBehavior) = b.ticks
 
 function action(b::TickerBehavior)
@@ -1056,8 +1602,36 @@ mutable struct PoissonBehavior <: Behavior
   ticks::Int64
 end
 
+"""
+    PoissonBehavior(action, millis)
+
+Create a behavior that runs randomly, on an averge once every `millis` milliseconds.
+The `action(a::Agent, b::Behavior)` function is called when the
+behavior runs. The `onstart` and `onend` fields in the behavior may be set
+to functions that are called when the behavior is initialized and terminates.
+Both functions are called with similar parameters as `action`.
+
+# Examples:
+```julia
+using Fjage
+
+@agent struct MyAgent end
+
+function Fjage.startup(a::MyAgent)
+  add(a, PoissonBehavior(5000) do a, b
+    @info "PoissonBehavior ran!"
+  end)
+end
+```
+"""
 PoissonBehavior(action, millis::Int64) = PoissonBehavior(nothing, millis, nothing, nothing, false, 0, nothing, action, nothing, 0)
 
+"""
+    tickcount(b::PoissonBehavior)
+
+Get the number of times a `PoissonBehavior` has ticked (its `action()` has been
+called).
+"""
 tickcount(b::PoissonBehavior) = b.ticks
 
 function action(b::PoissonBehavior)
@@ -1094,6 +1668,49 @@ mutable struct MessageBehavior <: Behavior
   onend::Union{Nothing,Function}
 end
 
+"""
+    MessageBehavior(action, millis)
+    MessageBehavior(action, filt, millis)
+
+Create a behavior that runs every time a message arrives.
+The `action(a::Agent, b::Behavior, msg)` function is called when a
+message arrives. The `onstart` and `onend` fields in the behavior may be set
+to functions that are called when the behavior is initialized and terminates.
+Both functions are called with similar parameters as `action`.
+
+If a filter `filt` is specified, only messages matching the filter trigger
+this behavior. A filter may be a message class or a function that takes the
+message as an argument and returns `true` to accept, `false` to reject.
+
+If multiple `MessageBehavior` that match a message are active, only one of them
+will receive the message. The behavior to receive is the message is chosen based
+on its `priority` field. Messages with filters are given higher default priority
+than ones without filters.
+
+The default `init()` for an agent automatically adds a `MessageBehavior` to
+dispatch messages to a `processrequest()` or `processmessage()` method. An
+agent may therefore process messages by providing methods for those functions.
+However, if an agent provides its own `init()` method, it should use
+`MessageBehavior` to handle incoming messages.
+
+# Examples:
+```julia
+using Fjage
+
+const MySpecialNtf = MessageClass(@__MODULE__, "MySpecialNtf")
+
+@agent struct MyAgent end
+
+function Fjage.init(a::MyAgent)
+  add(a, MessageBehavior(MySpecialNtf) do a, b, msg
+    @info "Got a special message: $msg"
+  end)
+  add(a, MessageBehavior() do a, b, msg
+    @info "Got a not-so-special message: $msg"
+  end)
+end
+```
+"""
 MessageBehavior(action) = MessageBehavior(nothing, nothing, nothing, nothing, false, 0, nothing, action, nothing)
 MessageBehavior(action, filt) = MessageBehavior(nothing, filt, nothing, false, (filt===nothing ? 0 : -100), nothing, action, nothing)
 
@@ -1125,6 +1742,65 @@ end
 
 ### parameters
 
+"""
+    ParameterMessageBehavior()
+
+`ParameterMessageBehavior` simplifies the task of an agent wishing to support
+parameters via `ParameterReq` and `ParameterRsp` messages. An agent providing
+parameters can advertise its parameters by providing an implementation for the
+`params(a)` method (or `params(a, ndx)` method for indexed parameters). The
+method returns a list of name-symbol pairs. Each entry represents a parameter
+with the specified name, and dispatched using the specified symbol. Get and set
+requests for the parameter are dispatched to `get(a, Val(symbol))` and
+`set(a, Val(symbol), value)` methods (or `get(a, Val(symbol), ndx)` and
+`set(a, Val(symbol), ndx, value)` for indexed parameters). If the method isn't
+defined, and an agent struct field with the same name is present, it is used to
+back the parameter.
+
+Setters should return the value that is set, so that it can be sent back to the
+requesting agent. If a setter returns `nothing`, the actual value is fetched using
+the getter and then sent to the requesting agent.
+
+An agent may choose to avoid advertising specific parameters by defining
+`isunlisted(Val(symbol))` method for the parameter to return `true`.
+Similarly, an agent may choose to mark a parameter as read-only by defining the
+`isreadonly(Val(symbol))` method for the parameter to return `true`.
+
+Parameter change events may be captured by defining a
+`onparamchange(a::Agent, b::Behavior, param, ndx, value)` method for the parameter.
+
+The default `init()` for an agent automatically adds a `ParameterMessageBehavior` to
+dispatch handle parameters for an agent, and so an agent can benefit from this
+behavior without explicitly adding it. If an agent provides its own `init()`
+method and wishes to support parameters, it should add this behavior during `init()`.
+
+# Examples:
+```julia
+using Fjage
+
+@agent struct MyAgent
+  param1::Int = 1
+  param2::Float64 = 0.0
+  secret::String = "top secret message"
+  x::Int = 2
+end
+
+Fjage.param(a::MyAgent) = [
+  "MyAgent.param1" => :param1,    # backed by a.param1
+  "MyAgent.param2" => :param2,    # backed by a.param2, but readonly
+  "MyAgent.X" => :X,              # backed by getter and setter
+  "MyAgent.Y" => :Y,              # backed by getter only, so readonly
+  "MyAgent.secret" => :secret     # backed by a.secret, but unlisted
+]
+
+Fjage.isreadonly(a::MyAgent, ::Val{:param2}) = true
+Fjage.isunlisted(a::MyAgent, ::Val{:secret}) = true
+
+Fjage.get(a::MyAgent, ::Val{:X}) = a.x
+Fjage.set(a::MyAgent, ::Val{:X}, value) = (a.x = clamp(value, 0, 10))
+Fjage.get(a::MyAgent, ::Val{:Y}) = a.x + 27
+```
+"""
 ParameterMessageBehavior() = MessageBehavior(nothing, ParameterReq, nothing, nothing, false, -100, nothing, _paramreq_action, nothing)
 
 params(a::Agent) = Pair{String,Symbol}[]
