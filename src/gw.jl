@@ -62,6 +62,7 @@ function _ask(gw, rq::Dict)
 end
 
 _agents(gw::Gateway) = [gw.agentID.name]
+_agents_types(gw::Gateway) = [(gw.agentID.name, "Gateway")]
 _subscriptions(gw::Gateway) = gw.subscriptions
 _services(gw::Gateway) = String[]
 _agentsforservice(gw::Gateway, svc) = String[]
@@ -101,7 +102,8 @@ function _run(gw)
         put!(gw.pending[json["id"]], json)
       elseif haskey(json, "action")
         if json["action"] == "agents"
-          _respond(gw, json, Dict("agentIDs" => _agents(gw)))
+          at = _agents_types(gw)
+          _respond(gw, json, Dict("agentIDs" => first.(at), "agentTypes" => last.(at)))
         elseif json["action"] == "agentForService"
           alist = _agentsforservice(gw, json["service"])
           if length(alist) > 0

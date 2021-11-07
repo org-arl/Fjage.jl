@@ -629,15 +629,18 @@ send(c::Container, msg, relay) = _deliver(c, msg, relay)
     ps(c::Container)
 
 Get a list of agents running in a container. The list contains tuples of agent
-name and agent type. The agent type may be `nothing` for agents running in
+name and agent type. The agent type may be an empty string for agents running in
 remote containers, if the containers do not support type query.
 """
-ps(c::StandaloneContainer) = collect((kv[1], typeof(kv[2])) for kv ∈ c.agents)
+ps(c::StandaloneContainer) = collect((kv[1], string(typeof(kv[2]))) for kv ∈ c.agents)
 
 function ps(c::SlaveContainer)
   rq = Dict("action" => "agents")
   rsp = _ask(c, rq)
-  [(a, nothing) for a in rsp["agentIDs"]]
+  if "agentTypes" ∈ keys(rsp) && length(rsp["agentIDs"]) == length(rsp["agentTypes"])
+    return collect(zip(rsp["agentIDs"], rsp["agentTypes"]))
+  end
+  [(a, "") for a in rsp["agentIDs"]]
 end
 
 function _deliver(c::StandaloneContainer, msg::Message)
@@ -661,6 +664,7 @@ function _deliver(::Nothing, msg::Message)
 end
 
 _agents(c::SlaveContainer) = collect(keys(c.agents))
+_agents_types(c::SlaveContainer) = [(k, string(typeof(v))) for (k, v) ∈ c.agents]
 _subscriptions(c::SlaveContainer) = collect(string.(keys(c.topics)))
 _services(c::SlaveContainer) = collect(keys(c.services))
 
