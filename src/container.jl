@@ -762,7 +762,7 @@ using Fjage
 @agent struct MyBareAgent end
 
 function Fjage.init(a::MyBareAgent)
-  @info "Agent $(AgentID(a)) init"
+  @info "MyBareAgent init"
 end
 ```
 """
@@ -802,11 +802,11 @@ using Fjage
 @agent struct MyAgent end
 
 function Fjage.setup(a::MyAgent)
-  @info "Agent $(AgentID(a)) setting up"
+  @info "MyAgent setting up"
 end
 
 function Fjage.startup(a::MyAgent)
-  @info "Agent $(AgentID(a)) started"
+  @info "MyAgent started"
 end
 ```
 """ setup
@@ -881,12 +881,12 @@ using Fjage
 @agent struct MyAgent end
 
 function Fjage.shutdown(a::MyAgent)
-  @info "Agent $(AgentID(a)) shutting down"
+  @info "MyAgent shutting down"
 end
 ```
 """
 function shutdown(a::Agent)
-  @debug "Agent $(AgentID(a)) terminated"
+  @debug "MyAgent terminated"
 end
 
 """
@@ -1340,7 +1340,7 @@ using Fjage
 
 function Fjage.startup(a::MyAgent)
   add(a, OneShotBehavior() do a, b
-    @info "OneShotBehavior for agent $(AgentID(a)) just ran"
+    @info "OneShotBehavior just ran"
   end)
 end
 ```
@@ -1392,7 +1392,7 @@ using Fjage
 
 function Fjage.startup(a::MyAgent)
   add(a, CyclicBehavior() do a, b
-    @info "CyclicBehavior for agent $(AgentID(a)) running..."
+    @info "CyclicBehavior running..."
   end)
 end
 ```
@@ -1703,10 +1703,10 @@ const MySpecialNtf = MessageClass(@__MODULE__, "MySpecialNtf")
 
 function Fjage.init(a::MyAgent)
   add(a, MessageBehavior(MySpecialNtf) do a, b, msg
-    @info "Got a special message: $msg"
+    @info "Got a special message: \$msg"
   end)
   add(a, MessageBehavior() do a, b, msg
-    @info "Got a not-so-special message: $msg"
+    @info "Got a not-so-special message: \$msg"
   end)
 end
 ```

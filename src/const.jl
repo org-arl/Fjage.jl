@@ -6,4 +6,4 @@ module Services
 end
 
 "Shell command execution request message."
-ShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq")
+const ShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq")

@@ -3,3 +3,4 @@ test/logs
 Manifest.toml
 TODO
 *.todo
+docs/build

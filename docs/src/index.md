@@ -1,14 +1,18 @@
-![](https://github.com/org-arl/Fjage.jl/workflows/CI/badge.svg)<br>
-_fjåge v1.10.0-SNAPSHOT_
+# Fjage.jl
+### Framework for Julia, Java and Groovy agents
+
+```@meta
+CurrentModule = Fjage
+```
 
 ## Introduction
 
-[fjåge](https://github.com/org-arl/fjage) provides a lightweight and
+[fjåge](https://github.com/org-arl/fjage/blob/master/README.md) provides a lightweight and
 easy-to-learn framework for agent-oriented software development in Java and
 Groovy. `Fjage.jl` is a Julia port of fjåge, which can be independently used,
 or used in conjunction with a Java/Groovy container in a multi-language application.
 
-### Key Features
+### Key features
 
 - Lightweight and fast
 - Easy to learn, and rapid agent development cycle
@@ -23,3 +27,9 @@ In Julia REPL:
 julia> # press "]" to enter package manager
 pkg> add Fjage
 ```
+
+### Useful reading
+
+- [fjåge home](https://github.com/org-arl/fjage)
+- [fjåge developer's guide](https://fjage.readthedocs.io/en/latest/)
+- [fjåge gateway API specifications](https://github.com/org-arl/fjage/blob/master/gateways/Gateways.md)
