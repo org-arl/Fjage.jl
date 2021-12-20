@@ -4,3 +4,4 @@ Manifest.toml
 TODO
 *.todo
 docs/build
+.vscode
