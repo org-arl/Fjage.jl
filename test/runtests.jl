@@ -204,6 +204,23 @@ try
       a[1].z = 14
       @test a[1].z == 14
     end
+
+    @testset "reconnect" begin
+      flush(gw)
+      close(gw.sock[])
+      send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
+      rsp = receive(gw, 1000)
+      @test rsp === nothing
+      for i ∈ 1:10
+        send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
+        rsp = receive(gw, 1000)
+        rsp === nothing || break
+        sleep(1.0)
+      end
+      @test typeof(rsp) <: Message
+      @test rsp.performative == "AGREE"
+    end
+
     close(gw)
 
   end

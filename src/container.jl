@@ -39,7 +39,7 @@ function loglevel!(level)
   throw(ArgumentError("Bad loglevel (allowed values are :debug, :info, :warn, :error, :none)"))
 end
 
-### stacktrace pretty printing
+### stacktrace pretty printing & auto-reconnection
 
 function reporterror(ex)
   fname = basename(@__FILE__)
@@ -50,6 +50,15 @@ function reporterror(ex)
   end
   bts = join(bt, '\n')
   @error "$(ex)\n  Stack trace:\n$(bts)"
+end
+
+function reconnect(c, ex)
+  c.reconnect[] || return false
+  isopen(c.gw[]) && return false
+  ex isa IOError || return false
+  @warn "Connection lost..."
+  Base.close(c.gw[])
+  true
 end
 
 ### realtime platform
@@ -195,6 +204,7 @@ struct SlaveContainer{T <: Platform} <: Container
   pending::Dict{String,Channel}
   host::String
   port::Int
+  reconnect::Ref{Bool}
 end
 
 """
@@ -222,12 +232,12 @@ Create a slave container running on a real-time platform (if unspecified),
 optionally with a specified name. If a name is not specified, a unique name
 is randomly generated.
 """
-SlaveContainer(host, port) = SlaveContainer(RealTimePlatform(), host, port)
-SlaveContainer(host, port, name) = SlaveContainer(RealTimePlatform(), host, port, name)
+SlaveContainer(host, port; reconnect=true) = SlaveContainer(RealTimePlatform(), host, port; reconnect=reconnect)
+SlaveContainer(host, port, name; reconnect=true) = SlaveContainer(RealTimePlatform(), host, port, name; reconnect=reconnect)
 
-function SlaveContainer(p::Platform, host, port, name=string(uuid4()))
+function SlaveContainer(p::Platform, host, port, name=string(uuid4()); reconnect=true)
   c = SlaveContainer(Ref(name), p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(),
-    Dict{String,Set{AgentID}}(), Ref(false), Ref(false), Ref(TCPSocket()), Dict{String,Channel}(), host, port)
+    Dict{String,Set{AgentID}}(), Ref(false), Ref(false), Ref(TCPSocket()), Dict{String,Channel}(), host, port, Ref(reconnect))
   add(p, c)
   c
 end
@@ -1358,7 +1368,7 @@ function action(b::OneShotBehavior)
     b.action === nothing || b.action(b.agent, b)
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    reporterror(ex)
+    reconnect(container(b.agent, ex)) || reporterror(ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1411,7 +1421,7 @@ function action(b::CyclicBehavior)
         try
           b.action === nothing || b.action(b.agent, b)
         catch ex
-          reporterror(ex)
+          reconnect(container(b.agent, ex)) || reporterror(ex)
         end
         yield()
       else
@@ -1420,7 +1430,7 @@ function action(b::CyclicBehavior)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    reporterror(ex)
+    reconnect(container(b.agent, ex)) || reporterror(ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1509,7 +1519,7 @@ function action(b::WakerBehavior)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    reporterror(ex)
+    reconnect(container(b.agent, ex)) || reporterror(ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1581,12 +1591,12 @@ function action(b::TickerBehavior)
       try
         b.done || b.action === nothing || b.action(b.agent, b)
       catch ex
-        reporterror(ex)
+        reconnect(container(b.agent, ex)) || reporterror(ex)
       end
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    reporterror(ex)
+    reconnect(container(b.agent, ex)) || reporterror(ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1648,12 +1658,12 @@ function action(b::PoissonBehavior)
       try
         b.done || b.action === nothing || b.action(b.agent, b)
       catch ex
-        reporterror(ex)
+        reconnect(container(b.agent, ex)) || reporterror(ex)
       end
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    reporterror(ex)
+    reconnect(container(b.agent, ex)) || reporterror(ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1726,12 +1736,12 @@ function action(b::MessageBehavior)
         msg = receive(b.agent, b.filt, BLOCKING; priority=b.priority)
         msg === nothing || b.action === nothing || b.action(b.agent, b, msg)
       catch ex
-        reporterror(ex)
+        reconnect(container(b.agent, ex)) || reporterror(ex)
       end
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    reporterror(ex)
+    reconnect(container(b.agent, ex)) || reporterror(ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1963,7 +1973,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
         end
       end
     catch ex
-      reporterror(ex)
+      reconnect(container(a, ex)) || reporterror(ex)
     end
   end
   rmsg = ParameterRsp(perf=Performative.INFORM, inReplyTo=msg.messageID, recipient=msg.sender, readonly=ro, index=ndx)
