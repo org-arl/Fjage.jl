@@ -385,6 +385,7 @@ function add(c::Container, name::String, a::Agent)
   a._aid = AgentID(name)
   c.agents[name] = a
   c.running[] && init(a)
+  @async _msgloop(a)
   @debug "Added agent $(name)::$(typeof(a))"
   a._aid
 end
@@ -403,6 +404,7 @@ function Base.kill(c::Container, aid::String)
   a = c.agents[aid]
   if c.running[]
     foreach(stop, a._behaviors)
+    notify(a._processmsg, false)
     shutdown(a)
   end
   a._container = nothing
@@ -750,6 +752,7 @@ macro agent(sdef)
     push!(fields, :(_behaviors::Set{Behavior} = Set{Behavior}()))
     push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
     push!(fields, :(_msgqueue::Vector{Message} = Message[]))
+    push!(fields, :(_processmsg::Condition = Condition()))
     :( Base.@kwdef mutable struct $T <: $P; $(fields...); end ) |> esc
   elseif @capture(sdef, struct T_ fields__ end)
     push!(fields, :(_aid::Union{AgentID,Nothing} = nothing))
@@ -757,6 +760,7 @@ macro agent(sdef)
     push!(fields, :(_behaviors::Set{Behavior} = Set{Behavior}()))
     push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
     push!(fields, :(_msgqueue::Vector{Message} = Message[]))
+    push!(fields, :(_processmsg::Condition = Condition()))
     :( Base.@kwdef mutable struct $T <: Agent; $(fields...); end ) |> esc
   else
     @error "Bad agent definition"
@@ -1109,7 +1113,7 @@ Lower priority numbers indicate a higher priority.
 function receive(a::Agent, filt, timeout::Int=0; priority=(filt===nothing ? 0 : -100))
   (container(a) === nothing || !isrunning(container(a))) && return nothing
   for (n, msg) ∈ enumerate(a._msgqueue)
-    if _matches(filt, msg)
+    if _matches(filt, msg) && !_listener_waiting(a, msg, priority)
       deleteat!(a._msgqueue, n)
       return msg
     end
@@ -1166,7 +1170,7 @@ Base.flush(a::Agent) = empty!(a._msgqueue)
 
 function _listen(a::Agent, ch::Channel, filt, priority::Int)
   for (n, (filt1, ch1, p)) ∈ enumerate(a._listeners)
-    if p > priority
+    if p ≥ priority
       insert!(a._listeners, n, (filt, ch, priority))
       return
     end
@@ -1189,18 +1193,43 @@ function _listener_notify(a::Agent)
   end
 end
 
+function _listener_waiting(a::Agent, msg::Message, priority::Int)
+  for (filt, ch, p) ∈ a._listeners
+    priority ≤ p && return false
+    _matches(filt, msg) && return true
+  end
+  false
+end
+
 function _deliver(a::Agent, msg::Message)
   @debug "$(a) <<< $(msg)"
-  for (filt, ch, p) ∈ a._listeners
-    if !isready(ch) && _matches(filt, msg)
-      put!(ch, msg)
-      return
-    end
-  end
   push!(a._msgqueue, msg)
   while length(a._msgqueue) > MAX_QUEUE_LEN
     popfirst!(a._msgqueue)
   end
+  notify(a._processmsg, true)
+end
+
+function _msgloop(a::Agent)
+  @debug "Start $(a) message loop"
+  try
+    while wait(a._processmsg)
+      @debug "Deliver messages in $(a) [qlen=$(length(a._msgqueue))]"
+      filter!(a._msgqueue) do msg
+        for (filt, ch, p) ∈ a._listeners
+          if _matches(filt, msg)
+            isready(ch) && return true
+            put!(ch, msg)
+            return false
+          end
+        end
+        true
+      end
+    end
+  catch ex
+    reporterror(a, ex)
+  end
+  @debug "Stop $(a) message loop"
 end
 
 ### behaviors
@@ -1735,19 +1764,24 @@ MessageBehavior(action) = MessageBehavior(nothing, nothing, nothing, nothing, fa
 MessageBehavior(action, filt) = MessageBehavior(nothing, filt, nothing, false, (filt===nothing ? 0 : -100), nothing, action, nothing)
 
 function action(b::MessageBehavior)
+  ch = Channel{Union{Message,Nothing}}(1)
   try
     b.onstart === nothing || b.onstart(b.agent, b)
+    _listen(b.agent, ch, b.filt, b.priority)
     while !b.done
       try
-        msg = receive(b.agent, b.filt, BLOCKING; priority=b.priority)
+        msg = take!(ch)
         msg === nothing || b.action === nothing || b.action(b.agent, b, msg)
       catch ex
-        reconnect(container(b.agent, ex)) || reporterror(ex)
+        reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
       end
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    reconnect(container(b.agent, ex)) || reporterror(ex)
+    reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
+  finally
+    _dont_listen(b.agent, ch)
+    close(ch)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
