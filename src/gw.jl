@@ -46,7 +46,7 @@ function _println(sock, s)
     println(sock, s)
   catch
     @warn "Connection lost..."
-    Base.close(sock)
+    close(sock)
   end
 end
 
@@ -205,7 +205,7 @@ end
 function Base.close(gw::Gateway)
   gw.reconnect[] = false
   _println(gw.sock[], "{\"alive\": false}")
-  Base.close(gw.sock[])
+  close(gw.sock[])
   nothing
 end
 

@@ -63,7 +63,7 @@ function reconnect(c, ex)
   isopen(c.gw[]) && return false
   ex isa IOError || return false
   @warn "Connection lost..."
-  Base.close(c.gw[])
+  close(c.gw[])
   true
 end
 
@@ -504,7 +504,7 @@ function shutdown(c::SlaveContainer)
   catch ex
     # ignore
   end
-  Base.close(c.sock[])
+  close(c.sock[])
   @debug "Stopped SlaveContainer"
   nothing
 end
@@ -1125,7 +1125,7 @@ function receive(a::Agent, filt, timeout::Int=0; priority=(filt===nothing ? 0 : 
   end
   msg = take!(ch)
   _dont_listen(a, ch)
-  Base.close(ch)
+  close(ch)
   msg
 end
 
@@ -1153,7 +1153,7 @@ function request(a::Agent, msg::Message, timeout::Int=timeout[])
   end
   msg = take!(ch)
   _dont_listen(a, ch)
-  Base.close(ch)
+  close(ch)
   msg
 end
 
