@@ -41,7 +41,7 @@ end
 
 ### stacktrace pretty printing & auto-reconnection
 
-function reporterror(ex)
+function reporterror(src, ex)
   fname = basename(@__FILE__)
   bt = String[]
   for s ∈ stacktrace(catch_backtrace())
@@ -49,8 +49,14 @@ function reporterror(ex)
     basename(string(s.file)) == fname && s.func == :run && break
   end
   bts = join(bt, '\n')
-  @error "$(ex)\n  Stack trace:\n$(bts)"
+  if src === nothing
+    @error "$(ex)\n  Stack trace:\n$(bts)"
+  else
+    @error "[$(src)] $(ex)\n  Stack trace:\n$(bts)"
+  end
 end
+
+reporterror(ex) = reporterror(nothing, ex)
 
 function reconnect(c, ex)
   c.reconnect[] || return false
@@ -1368,7 +1374,7 @@ function action(b::OneShotBehavior)
     b.action === nothing || b.action(b.agent, b)
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    reconnect(container(b.agent, ex)) || reporterror(ex)
+    reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1421,7 +1427,7 @@ function action(b::CyclicBehavior)
         try
           b.action === nothing || b.action(b.agent, b)
         catch ex
-          reconnect(container(b.agent, ex)) || reporterror(ex)
+          reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
         end
         yield()
       else
@@ -1430,7 +1436,7 @@ function action(b::CyclicBehavior)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    reconnect(container(b.agent, ex)) || reporterror(ex)
+    reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1519,7 +1525,7 @@ function action(b::WakerBehavior)
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    reconnect(container(b.agent, ex)) || reporterror(ex)
+    reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1591,12 +1597,12 @@ function action(b::TickerBehavior)
       try
         b.done || b.action === nothing || b.action(b.agent, b)
       catch ex
-        reconnect(container(b.agent, ex)) || reporterror(ex)
+        reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
       end
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    reconnect(container(b.agent, ex)) || reporterror(ex)
+    reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1658,12 +1664,12 @@ function action(b::PoissonBehavior)
       try
         b.done || b.action === nothing || b.action(b.agent, b)
       catch ex
-        reconnect(container(b.agent, ex)) || reporterror(ex)
+        reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
       end
     end
     b.onend === nothing || b.onend(b.agent, b)
   catch ex
-    reconnect(container(b.agent, ex)) || reporterror(ex)
+    reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1973,7 +1979,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
         end
       end
     catch ex
-      reconnect(container(a, ex)) || reporterror(ex)
+      reconnect(container(a, ex)) || reporterror(a, ex)
     end
   end
   rmsg = ParameterRsp(perf=Performative.INFORM, inReplyTo=msg.messageID, recipient=msg.sender, readonly=ro, index=ndx)
