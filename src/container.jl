@@ -1,5 +1,3 @@
-using Base.Threads: Condition
-
 export Platform, RealTimePlatform, add, currenttimemillis, delay, containers, isrunning, start, shutdown
 export Container, StandaloneContainer, SlaveContainer, canlocateagent, containsagent, agent, agents
 export register, deregister, services, add, agentforservice, agentsforservice, canlocateagent, ps
@@ -73,7 +71,7 @@ end
 Base.@kwdef struct RealTimePlatform <: Platform
   containers = Container[]
   running = Ref(false)
-  term = Condition()
+  term = Threads.Condition()
 end
 
 function Base.show(io::IO, p::RealTimePlatform)
@@ -404,7 +402,7 @@ function Base.kill(c::Container, aid::String)
   a = c.agents[aid]
   if c.running[]
     foreach(stop, a._behaviors)
-    notify(a._processmsg, false)
+    lock(() -> notify(a._processmsg, false), a._processmsg)
     shutdown(a)
   end
   a._container = nothing
@@ -752,7 +750,7 @@ macro agent(sdef)
     push!(fields, :(_behaviors::Set{Behavior} = Set{Behavior}()))
     push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
     push!(fields, :(_msgqueue::Vector{Message} = Message[]))
-    push!(fields, :(_processmsg::Condition = Condition()))
+    push!(fields, :(_processmsg::Threads.Condition = Threads.Condition()))
     :( Base.@kwdef mutable struct $T <: $P; $(fields...); end ) |> esc
   elseif @capture(sdef, struct T_ fields__ end)
     push!(fields, :(_aid::Union{AgentID,Nothing} = nothing))
@@ -760,7 +758,7 @@ macro agent(sdef)
     push!(fields, :(_behaviors::Set{Behavior} = Set{Behavior}()))
     push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
     push!(fields, :(_msgqueue::Vector{Message} = Message[]))
-    push!(fields, :(_processmsg::Condition = Condition()))
+    push!(fields, :(_processmsg::Threads.Condition = Threads.Condition()))
     :( Base.@kwdef mutable struct $T <: Agent; $(fields...); end ) |> esc
   else
     @error "Bad agent definition"
@@ -1207,13 +1205,13 @@ function _deliver(a::Agent, msg::Message)
   while length(a._msgqueue) > MAX_QUEUE_LEN
     popfirst!(a._msgqueue)
   end
-  notify(a._processmsg, true)
+  lock(() -> notify(a._processmsg, true), a._processmsg)
 end
 
 function _msgloop(a::Agent)
   @debug "Start $(a) message loop"
   try
-    while wait(a._processmsg)
+    while lock(() -> wait(a._processmsg), a._processmsg)
       @debug "Deliver messages in $(a) [qlen=$(length(a._msgqueue))]"
       filter!(a._msgqueue) do msg
         for (filt, ch, p) ∈ a._listeners
@@ -1290,13 +1288,13 @@ restarted after `millis` milliseconds.
 """
 function block(b::Behavior)
   b.done && return
-  b.block = Condition()
+  b.block = Threads.Condition()
   nothing
 end
 
 function block(b::Behavior, millis)
   b.done && return
-  b.block = Condition()
+  b.block = Threads.Condition()
   b.timer = Timer(millis/1000)
   @async begin
     try
@@ -1363,7 +1361,7 @@ function action end
 
 mutable struct OneShotBehavior <: Behavior
   agent::Union{Nothing,Agent}
-  block::Union{Nothing,Condition}
+  block::Union{Nothing,Threads.Condition}
   timer::Union{Nothing,Timer}
   done::Bool
   priority::Int
@@ -1412,7 +1410,7 @@ end
 
 mutable struct CyclicBehavior <: Behavior
   agent::Union{Nothing,Agent}
-  block::Union{Nothing,Condition}
+  block::Union{Nothing,Threads.Condition}
   timer::Union{Nothing,Timer}
   done::Bool
   priority::Int
@@ -1475,7 +1473,7 @@ end
 mutable struct WakerBehavior <: Behavior
   agent::Union{Nothing,Agent}
   millis::Int64
-  block::Union{Nothing,Condition}
+  block::Union{Nothing,Threads.Condition}
   timer::Union{Nothing,Timer}
   done::Bool
   priority::Int
@@ -1574,7 +1572,7 @@ end
 mutable struct TickerBehavior <: Behavior
   agent::Union{Nothing,Agent}
   millis::Int64
-  block::Union{Nothing,Condition}
+  block::Union{Nothing,Threads.Condition}
   timer::Union{Nothing,Timer}
   done::Bool
   priority::Int
@@ -1641,7 +1639,7 @@ end
 mutable struct PoissonBehavior <: Behavior
   agent::Union{Nothing,Agent}
   millis::Int64
-  block::Union{Nothing,Condition}
+  block::Union{Nothing,Threads.Condition}
   timer::Union{Nothing,Timer}
   done::Bool
   priority::Int
@@ -1708,7 +1706,7 @@ end
 mutable struct MessageBehavior <: Behavior
   agent::Union{Nothing,Agent}
   filt::Any
-  block::Union{Nothing,Condition}
+  block::Union{Nothing,Threads.Condition}
   timer::Union{Nothing,Timer}
   done::Bool
   priority::Int
