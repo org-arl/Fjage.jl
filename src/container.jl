@@ -383,7 +383,7 @@ function add(c::Container, name::String, a::Agent)
   a._aid = AgentID(name)
   c.agents[name] = a
   c.running[] && init(a)
-  @async _msgloop(a)
+  Threads.@spawn _msgloop(a)
   @debug "Added agent $(name)::$(typeof(a))"
   a._aid
 end
@@ -438,7 +438,7 @@ function start(c::StandaloneContainer)
   c.initing[] = false
   foreach(c.agents) do kv
     foreach(kv[2]._behaviors) do b
-      @async action(b)
+      Threads.@spawn action(b)
     end
   end
   c
@@ -460,7 +460,7 @@ function start(c::SlaveContainer)
   foreach(kv -> init(kv[2]), c.agents)
   @debug "SlaveContainer is running"
   # behaviors to be started and c.initing[] reset on _alive()
-  @async _run(c)
+  Threads.@spawn _run(c)
   c
 end
 
@@ -469,7 +469,7 @@ function _alive(c::SlaveContainer)
   c.initing[] = false
   foreach(c.agents) do kv
     foreach(kv[2]._behaviors) do b
-      @async action(b)
+      Threads.@spawn action(b)
     end
   end
 end
@@ -751,6 +751,7 @@ macro agent(sdef)
     push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
     push!(fields, :(_msgqueue::Vector{Message} = Message[]))
     push!(fields, :(_processmsg::Threads.Condition = Threads.Condition()))
+    push!(fields, :(_lock::ReentrantLock = ReentrantLock()))
     :( Base.@kwdef mutable struct $T <: $P; $(fields...); end ) |> esc
   elseif @capture(sdef, struct T_ fields__ end)
     push!(fields, :(_aid::Union{AgentID,Nothing} = nothing))
@@ -759,6 +760,7 @@ macro agent(sdef)
     push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
     push!(fields, :(_msgqueue::Vector{Message} = Message[]))
     push!(fields, :(_processmsg::Threads.Condition = Threads.Condition()))
+    push!(fields, :(_lock::ReentrantLock = ReentrantLock()))
     :( Base.@kwdef mutable struct $T <: Agent; $(fields...); end ) |> esc
   else
     @error "Bad agent definition"
@@ -1120,7 +1122,7 @@ function receive(a::Agent, filt, timeout::Int=0; priority=(filt===nothing ? 0 : 
   ch = Channel{Union{Message,Nothing}}(1)
   _listen(a, ch, filt, priority)
   if timeout > 0
-    @async begin
+    Threads.@spawn begin
       delay(a, timeout)
       put!(ch, nothing)
     end
@@ -1148,7 +1150,7 @@ function request(a::Agent, msg::Message, timeout::Int=timeout[])
   _listen(a, ch, msg, -100)
   send(a, msg)
   if timeout > 0
-    @async begin
+    Threads.@spawn begin
       delay(a, timeout)
       put!(ch, nothing)
     end
@@ -1246,7 +1248,7 @@ function add(a::Agent, b::Behavior)
   b.agent = a
   @debug "Add $(typeof(b)) to agent $(a._aid)"
   push!(a._behaviors, b)
-  c.initing[] || @async action(b)
+  c.initing[] || Threads.@spawn action(b)
   b
 end
 
@@ -1296,7 +1298,7 @@ function block(b::Behavior, millis)
   b.done && return
   b.block = Threads.Condition()
   b.timer = Timer(millis/1000)
-  @async begin
+  Threads.@spawn begin
     try
       wait(b.timer)
     finally
@@ -1359,6 +1361,16 @@ its intended behavior.
 """
 function action end
 
+# wrapper to ensure that behavior callbacks are atomic for the agent
+function _mutex_call(f, a, b...)
+  lock(a._lock)
+  try
+    f(a, b...)
+  finally
+    unlock(a._lock)
+  end
+end
+
 mutable struct OneShotBehavior <: Behavior
   agent::Union{Nothing,Agent}
   block::Union{Nothing,Threads.Condition}
@@ -1396,10 +1408,10 @@ OneShotBehavior(action) = OneShotBehavior(nothing, nothing, nothing, false, 0, n
 
 function action(b::OneShotBehavior)
   try
-    b.onstart === nothing || b.onstart(b.agent, b)
+    b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     b.block === nothing || lock(() -> wait(b.block), b.block)
-    b.action === nothing || b.action(b.agent, b)
-    b.onend === nothing || b.onend(b.agent, b)
+    b.action === nothing || _mutex_call(b.action, b.agent, b)
+    b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
     reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
   end
@@ -1448,11 +1460,11 @@ CyclicBehavior(action) = CyclicBehavior(nothing, nothing, nothing, false, 0, not
 
 function action(b::CyclicBehavior)
   try
-    b.onstart === nothing || b.onstart(b.agent, b)
+    b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     while !b.done
       if b.block === nothing
         try
-          b.action === nothing || b.action(b.agent, b)
+          b.action === nothing || _mutex_call(b.action, b.agent, b)
         catch ex
           reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
         end
@@ -1461,7 +1473,7 @@ function action(b::CyclicBehavior)
         lock(() -> wait(b.block), b.block)
       end
     end
-    b.onend === nothing || b.onend(b.agent, b)
+    b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
     reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
   end
@@ -1541,16 +1553,16 @@ BackoffBehavior(action, millis::Int64) = WakerBehavior(nothing, millis, nothing,
 
 function action(b::WakerBehavior)
   try
-    b.onstart === nothing || b.onstart(b.agent, b)
+    b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     while !b.done
       block(b, b.millis)
       b.block === nothing || lock(() -> wait(b.block), b.block)
       if !b.done
         b.done = true
-        b.action === nothing || b.action(b.agent, b)
+        b.action === nothing || _mutex_call(b.action, b.agent, b)
       end
     end
-    b.onend === nothing || b.onend(b.agent, b)
+    b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
     reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
   end
@@ -1616,18 +1628,18 @@ tickcount(b::TickerBehavior) = b.ticks
 
 function action(b::TickerBehavior)
   try
-    b.onstart === nothing || b.onstart(b.agent, b)
+    b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     while !b.done
       block(b, b.millis)
       b.block === nothing || lock(() -> wait(b.block), b.block)
       b.ticks += 1
       try
-        b.done || b.action === nothing || b.action(b.agent, b)
+        b.done || b.action === nothing || _mutex_call(b.action, b.agent, b)
       catch ex
         reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
       end
     end
-    b.onend === nothing || b.onend(b.agent, b)
+    b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
     reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
   end
@@ -1683,18 +1695,18 @@ tickcount(b::PoissonBehavior) = b.ticks
 
 function action(b::PoissonBehavior)
   try
-    b.onstart === nothing || b.onstart(b.agent, b)
+    b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     while !b.done
       block(b, round(Int64, b.millis * randexp()))
       b.block === nothing || lock(() -> wait(b.block), b.block)
       b.ticks += 1
       try
-        b.done || b.action === nothing || b.action(b.agent, b)
+        b.done || b.action === nothing || _mutex_call(b.action, b.agent, b)
       catch ex
         reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
       end
     end
-    b.onend === nothing || b.onend(b.agent, b)
+    b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
     reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
   end
@@ -1764,17 +1776,17 @@ MessageBehavior(action, filt) = MessageBehavior(nothing, filt, nothing, false, (
 function action(b::MessageBehavior)
   ch = Channel{Union{Message,Nothing}}(1)
   try
-    b.onstart === nothing || b.onstart(b.agent, b)
+    b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     _listen(b.agent, ch, b.filt, b.priority)
     while !b.done
       try
         msg = take!(ch)
-        msg === nothing || b.action === nothing || b.action(b.agent, b, msg)
+        msg === nothing || b.action === nothing ||  _mutex_call(b.action, b.agent, b, msg)
       catch ex
         reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
       end
     end
-    b.onend === nothing || b.onend(b.agent, b)
+    b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
     reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
   finally
