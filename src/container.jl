@@ -1112,21 +1112,26 @@ Lower priority numbers indicate a higher priority.
 """
 function receive(a::Agent, filt, timeout::Int=0; priority=(filt===nothing ? 0 : -100))
   (container(a) === nothing || !isrunning(container(a))) && return nothing
-  for (n, msg) ∈ enumerate(a._msgqueue)
-    if _matches(filt, msg) && !_listener_waiting(a, msg, priority)
-      deleteat!(a._msgqueue, n)
-      return msg
+  m = lock(a._processmsg) do
+    for (n, msg) ∈ enumerate(a._msgqueue)
+      if _matches(filt, msg) && !_listener_waiting(a, msg, priority)
+        deleteat!(a._msgqueue, n)
+        return msg
+      end
     end
+    nothing
   end
+  m === nothing || return m
   timeout == 0 && return nothing
   ch = Channel{Union{Message,Nothing}}(1)
   _listen(a, ch, filt, priority)
   if timeout > 0
-    Threads.@spawn begin
+    @async begin
       delay(a, timeout)
       put!(ch, nothing)
     end
   end
+  lock(() -> notify(a._processmsg, true), a._processmsg)
   msg = take!(ch)
   _dont_listen(a, ch)
   close(ch)
@@ -1150,7 +1155,7 @@ function request(a::Agent, msg::Message, timeout::Int=timeout[])
   _listen(a, ch, msg, -100)
   send(a, msg)
   if timeout > 0
-    Threads.@spawn begin
+    @async begin
       delay(a, timeout)
       put!(ch, nothing)
     end
@@ -1166,7 +1171,7 @@ end
 
 Flush agent's incoming message queue.
 """
-Base.flush(a::Agent) = empty!(a._msgqueue)
+Base.flush(a::Agent) = lock(() -> empty!(a._msgqueue), a._processmsg)
 
 function _listen(a::Agent, ch::Channel, filt, priority::Int)
   for (n, (filt1, ch1, p)) ∈ enumerate(a._listeners)
@@ -1302,7 +1307,7 @@ function block(b::Behavior, millis)
   b.done && return
   b.block = Threads.Condition()
   b.timer = Timer(millis/1000)
-  Threads.@spawn begin
+  @async begin
     try
       wait(b.timer)
     finally
@@ -1784,9 +1789,9 @@ function action(b::MessageBehavior)
     _listen(b.agent, ch, b.filt, b.priority)
     while !b.done
       try
+        lock(() -> notify(b.agent._processmsg, true), b.agent._processmsg)
         msg = take!(ch)
         msg === nothing || b.action === nothing ||  _mutex_call(b.action, b.agent, b, msg)
-        lock(() -> notify(b.agent._processmsg, true), a._processmsg)
       catch ex
         reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
       end
