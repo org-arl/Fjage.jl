@@ -1203,27 +1203,31 @@ end
 
 function _deliver(a::Agent, msg::Message)
   @debug "$(a) <<< $(msg)"
-  push!(a._msgqueue, msg)
-  while length(a._msgqueue) > MAX_QUEUE_LEN
-    popfirst!(a._msgqueue)
+  lock(a._processmsg) do
+    push!(a._msgqueue, msg)
+    while length(a._msgqueue) > MAX_QUEUE_LEN
+      popfirst!(a._msgqueue)
+    end
+    notify(a._processmsg, true)
   end
-  lock(() -> notify(a._processmsg, true), a._processmsg)
 end
 
 function _msgloop(a::Agent)
   @debug "Start $(a) message loop"
   try
-    while lock(() -> wait(a._processmsg), a._processmsg)
-      @debug "Deliver messages in $(a) [qlen=$(length(a._msgqueue))]"
-      filter!(a._msgqueue) do msg
-        for (filt, ch, p) ∈ a._listeners
-          if _matches(filt, msg)
-            isready(ch) && return true
-            put!(ch, msg)
-            return false
+    lock(a._processmsg) do
+      while wait(a._processmsg)
+        @debug "Deliver messages in $(a) [qlen=$(length(a._msgqueue))]"
+        filter!(a._msgqueue) do msg
+          for (filt, ch, p) ∈ a._listeners
+            if _matches(filt, msg)
+              isready(ch) && return true
+              put!(ch, msg)
+              return false
+            end
           end
+          true
         end
-        true
       end
     end
   catch ex
@@ -1782,6 +1786,7 @@ function action(b::MessageBehavior)
       try
         msg = take!(ch)
         msg === nothing || b.action === nothing ||  _mutex_call(b.action, b.agent, b, msg)
+        lock(() -> notify(b.agent._processmsg, true), a._processmsg)
       catch ex
         reconnect(container(b.agent, ex)) || reporterror(b.agent, ex)
       end
