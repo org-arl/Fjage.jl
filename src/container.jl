@@ -498,6 +498,7 @@ function shutdown(c::SlaveContainer)
   empty!(c.agents)
   empty!(c.topics)
   empty!(c.services)
+  c.reconnect[] = false
   c.running[] = false
   try
     println(c.sock[], "{\"alive\": false}")
@@ -703,7 +704,12 @@ function _deliver(c::SlaveContainer, msg::Message, relay::Bool)
         "data" => msg.__data__
       )
     ))
-    println(c.sock[], json)
+    try
+      println(c.sock[], json)
+    catch ex
+      @debug "Message $(msg) delivery failed: $(ex)"
+      return false
+    end
   elseif msg.recipient ∈ keys(c.topics)
     foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
   else
