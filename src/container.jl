@@ -1916,8 +1916,10 @@ function _get(a::Agent, p)
     x === missing && (x = Fjage.get(a, p))
   catch end
   try
-    x = getfield(a, p)
-    isro = false
+    if x === missing
+      x = getfield(a, p)
+      isro = false
+    end
   catch end
   try
     isro === missing && (isro = isreadonly(a, Val(p)))
