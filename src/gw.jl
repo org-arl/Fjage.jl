@@ -24,7 +24,7 @@ struct Gateway
       Channel(MAX_QUEUE_LEN),
       host, port, Ref(reconnect)
     )
-    Threads.@spawn _run(gw)
+    @async _run(gw)
     gw
   end
 end
@@ -319,7 +319,7 @@ function receive(gw::Gateway, timeout::Int=0)
   timeout == 0 && return nothing
   waiting = true
   if timeout > 0
-    Threads.@spawn begin
+    @async begin
       sleep(timeout/1000.0)
       waiting && push!(gw.queue, nothing)
     end

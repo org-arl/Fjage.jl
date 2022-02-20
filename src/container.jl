@@ -383,7 +383,7 @@ function add(c::Container, name::String, a::Agent)
   a._aid = AgentID(name)
   c.agents[name] = a
   c.running[] && init(a)
-  Threads.@spawn _msgloop(a)
+  @async _msgloop(a)
   @debug "Added agent $(name)::$(typeof(a))"
   a._aid
 end
@@ -438,7 +438,7 @@ function start(c::StandaloneContainer)
   c.initing[] = false
   foreach(c.agents) do kv
     foreach(kv[2]._behaviors) do b
-      Threads.@spawn action(b)
+      @async action(b)
     end
   end
   c
@@ -460,7 +460,7 @@ function start(c::SlaveContainer)
   foreach(kv -> init(kv[2]), c.agents)
   @debug "SlaveContainer is running"
   # behaviors to be started and c.initing[] reset on _alive()
-  Threads.@spawn _run(c)
+  @async _run(c)
   c
 end
 
@@ -469,7 +469,7 @@ function _alive(c::SlaveContainer)
   c.initing[] = false
   foreach(c.agents) do kv
     foreach(kv[2]._behaviors) do b
-      Threads.@spawn action(b)
+      @async action(b)
     end
   end
 end
@@ -1263,7 +1263,7 @@ function add(a::Agent, b::Behavior)
   b.agent = a
   @debug "Add $(typeof(b)) to agent $(a._aid)"
   push!(a._behaviors, b)
-  c.initing[] || Threads.@spawn action(b)
+  c.initing[] || @async action(b)
   b
 end
 
@@ -1378,11 +1378,8 @@ function action end
 
 # wrapper to ensure that behavior callbacks are atomic for the agent
 function _mutex_call(f, a, b...)
-  lock(a._lock)
-  try
+  lock(a._lock) do
     f(a, b...)
-  finally
-    unlock(a._lock)
   end
 end
 
