@@ -1180,36 +1180,44 @@ Flush agent's incoming message queue.
 Base.flush(a::Agent) = lock(() -> empty!(a._msgqueue), a._processmsg)
 
 function _listen(a::Agent, ch::Channel, filt, priority::Int)
-  for (n, (filt1, ch1, p)) ∈ enumerate(a._listeners)
-    if p ≥ priority
-      insert!(a._listeners, n, (filt, ch, priority))
-      return
+  lock(a._processmsg) do
+    for (n, (filt1, ch1, p)) ∈ enumerate(a._listeners)
+      if p ≥ priority
+        insert!(a._listeners, n, (filt, ch, priority))
+        return
+      end
     end
+    push!(a._listeners, (filt, ch, priority))
   end
-  push!(a._listeners, (filt, ch, priority))
 end
 
 function _dont_listen(a::Agent, ch::Channel)
-  for (n, (filt, ch1, p)) ∈ enumerate(a._listeners)
-    if ch === ch1
-      deleteat!(a._listeners, n)
-      return
+  lock(a._processmsg) do
+    for (n, (filt, ch1, p)) ∈ enumerate(a._listeners)
+      if ch === ch1
+        deleteat!(a._listeners, n)
+        return
+      end
     end
   end
 end
 
 function _listener_notify(a::Agent)
-  for (filt, ch, p) ∈ a._listeners
-    put!(ch, nothing)
+  lock(a._processmsg) do
+    for (filt, ch, p) ∈ a._listeners
+      put!(ch, nothing)
+    end
   end
 end
 
 function _listener_waiting(a::Agent, msg::Message, priority::Int)
-  for (filt, ch, p) ∈ a._listeners
-    priority ≤ p && return false
-    _matches(filt, msg) && return true
+  lock(a._processmsg) do
+    for (filt, ch, p) ∈ a._listeners
+      priority ≤ p && return false
+      _matches(filt, msg) && return true
+    end
+    false
   end
-  false
 end
 
 function _deliver(a::Agent, msg::Message)
@@ -1225,9 +1233,9 @@ end
 
 function _msgloop(a::Agent)
   @debug "Start $(a) message loop"
-  try
-    lock(a._processmsg) do
-      while wait(a._processmsg)
+  lock(a._processmsg) do
+    while wait(a._processmsg)
+      try
         @debug "Deliver messages in $(a) [qlen=$(length(a._msgqueue))]"
         filter!(a._msgqueue) do msg
           for (filt, ch, p) ∈ a._listeners
@@ -1239,10 +1247,10 @@ function _msgloop(a::Agent)
           end
           true
         end
+      catch ex
+        @warn "Message delivery failed: $(ex)"
       end
     end
-  catch ex
-    reporterror(a, ex)
   end
   @debug "Stop $(a) message loop"
 end
