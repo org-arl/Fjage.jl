@@ -1,6 +1,8 @@
 using Test
 using Fjage
 
+using Base64
+
 # start fjåge
 
 println("Starting fjåge...")
@@ -219,6 +221,36 @@ try
       end
       @test typeof(rsp) <: Message
       @test rsp.performative == "AGREE"
+    end
+
+    # Issue 21
+    @testset "inflate json" begin
+      vec_f64 = [1.0, 2.0, 3.4]
+      vec_c64 = [1.0 + 2.0im, 3.4 + 2.1im]
+      obj = Fjage._inflate("""
+        {
+          "clazz": "org.arl.unet.ParamChangeNtf",
+          "data": {
+            "paramValues": {
+              "vecF64": {
+                "clazz": "[D",
+                "data": "$(reinterpret(UInt8, vec_f64) |> base64encode)"
+              },
+              "vecC64": {
+                "clazz": "[D",
+                "data": "$(reinterpret(UInt8, vec_c64) |> base64encode)"
+              },
+              "vecC64__isComplex": true
+            },
+            "sender": "A",
+            "recipient": "B",
+          }
+        }
+      """)
+      @test obj.paramValues["vecF64"] == vec_f64
+      @test obj.paramValues["vecC64"] == vec_c64
+      @test obj.sender = AgentID("A")
+      @test obj.recipient = AgentID("A")
     end
 
     close(gw)
