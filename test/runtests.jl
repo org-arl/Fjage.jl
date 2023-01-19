@@ -243,14 +243,14 @@ try
               "vecC64__isComplex": true
             },
             "sender": "A",
-            "recipient": "B",
+            "recipient": "B"
           }
         }
       """)
       @test obj.paramValues["vecF64"] == vec_f64
       @test obj.paramValues["vecC64"] == vec_c64
-      @test obj.sender = AgentID("A")
-      @test obj.recipient = AgentID("A")
+      @test obj.sender == AgentID("A")
+      @test obj.recipient == AgentID("B")
     end
 
     close(gw)
