@@ -247,31 +247,38 @@ end
 
 # creates a message object from a JSON representation of the object
 function _inflate(json)
+  function inflate_recursively!(d)
+    for (k,v) in d
+      if typeof(v) <: Dict && haskey(v, "clazz") && match(r"^\[.$", v["clazz"]) != nothing
+        v = _b64toarray(v)
+      end
+      if typeof(v) <: Array && length(v) > 0
+        t = typeof(v[1])
+        v = Array{t}(v)
+        kcplx = k*"__isComplex"
+        if haskey(d, kcplx) && d[kcplx]
+          v = Array{Complex{t}}(reinterpret(Complex{t}, v))
+          delete!(d, kcplx)
+        end
+      end
+      if typeof(v) <: Dict
+        v = inflate_recursively!(v)
+      end
+      d[k] = v
+    end
+    return d
+  end
+
   if typeof(json) == String
     json = JSON.parse(json)
   end
   clazz = json["clazz"]
-  data = json["data"]
+  data = inflate_recursively!(json["data"])
   stype = _messageclass_lookup(clazz)
   obj = @eval $stype()
-  for k in keys(data)
-    v = data[k]
-    if endswith(k, "__isComplex")
-      continue
-    end
+  for (k,v) in data
     if k == "sender" || k == "recipient"
       v = AgentID(v)
-    end
-    if typeof(v) <: Dict && haskey(v, "clazz") && match(r"^\[.$", v["clazz"]) != nothing
-      v = _b64toarray(v)
-    end
-    if typeof(v) <: Array && length(v) > 0
-      t = typeof(v[1])
-      v = Array{t}(v)
-      kcplx = k*"__isComplex"
-      if haskey(data, kcplx) && data[kcplx]
-        v = Array{Complex{t}}(reinterpret(Complex{t}, v))
-      end
     end
     obj.__data__[k] = v
   end
