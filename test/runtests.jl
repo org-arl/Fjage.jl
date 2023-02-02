@@ -233,3 +233,26 @@ finally
   kill(master)
 
 end
+
+@testset "TaskBehavior" begin
+  c = Container()
+  start(c)
+
+  @agent struct MyAgent; end
+  a = MyAgent()
+  add(c, a)
+
+  dt = 100
+  t = zeros(Int, 10)
+  b = TaskBehavior() do a, b
+    for i in eachindex(t)
+      t[i] = currenttimemillis(a)
+      Fjage.sleep(b, dt)
+    end
+  end
+  add(a, b)
+  sleep(0.5 + length(t) * dt * 1e-3)
+
+  @test b.done
+  @test all(diff(t) .>= dt)
+end
