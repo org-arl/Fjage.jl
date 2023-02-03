@@ -19,8 +19,8 @@ Create a behavior which allows for explicit interruptions.
 
 The given function `action(a::Agent, b::Behavior)` is called exactly once at the
 earliest available opportunity. The behavior may explicitly interrupt itself by
-calling `Fjage.sleep(b, millis)`, which blocks the behavior for `millis`
-milliseconds.
+calling `Fjage.pause(b, millis)`, which immediately blocks the behavior for
+`millis` milliseconds.
 
 # Examples:
 ```julia
@@ -29,8 +29,8 @@ milliseconds.
 function Fjage.startup(a::MyAgent)
   add(a, TaskBehavior() do a, b
     for ith = ("first", "second", "third")
-      println("Going to sleep for the \$ith time")
-      Fjage.sleep(b, 500)
+      println("Pausing for the \$ith time")
+      Fjage.pause(b, 500)
     end
   end)
 end
@@ -80,7 +80,7 @@ function action(b::TaskBehavior)
 end
 
 """
-    Fjage.sleep(b::TaskBehavior, millis)
+    Fjage.pause(b::TaskBehavior, millis)
 
 Block the behavior for `millis` milliseconds.
 
@@ -88,6 +88,7 @@ Unlike `block()`, this function blocks immediately and only resumes once the
 block has expired. Unlike `Base.sleep()`, this function releases the lock on the
 behavior's agent.
 """
+function pause(b::TaskBehavior, millis)
     if current_task() != b.action_task
         @error "Fjage.pause() has been called outside of an action context!"
     end

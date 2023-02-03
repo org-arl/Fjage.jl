@@ -247,7 +247,7 @@ end
   b = TaskBehavior() do a, b
     for i in eachindex(t)
       t[i] = currenttimemillis(a)
-      Fjage.sleep(b, dt)
+      Fjage.pause(b, dt)
     end
   end
   add(a, b)
