@@ -8,7 +8,8 @@ mutable struct TaskBehavior <: Behavior
     priority::Int
 
     action::Any
-    main_task::Union{Nothing, Task}
+    control_task::Union{Nothing, Task}
+    action_task::Union{Nothing, Task}
 end
 
 """
@@ -43,13 +44,14 @@ function TaskBehavior(action)
         false,   # done
         0,       # priority
         action,  # action
-        nothing, # main_task
+        nothing, # control_task
+        nothing, # action_task
     )
 end
 
 function action(b::TaskBehavior)
-    b.main_task = current_task()
-    secondary_task = Task() do
+    b.control_task = current_task()
+    b.action_task = Task() do
         try
             b.action(b.agent, b)
         catch e
@@ -64,14 +66,15 @@ function action(b::TaskBehavior)
                 lock(() -> wait(b.block), b.block)
             end
             _mutex_call(b.agent) do agent
-                yieldto(secondary_task)
+                yieldto(b.action_task)
             end
         end
     catch ex
         reporterror(b.agent, ex)
     end
     b.done = true
-    b.main_task = nothing
+    b.control_task = nothing
+    b.action_task = nothing
     delete!(b.agent._behaviors, b)
     b.agent = nothing
 end
@@ -85,7 +88,9 @@ Unlike `block()`, this function blocks immediately and only resumes once the
 block has expired. Unlike `Base.sleep()`, this function releases the lock on the
 behavior's agent.
 """
-function sleep(b::TaskBehavior, millis)
+    if current_task() != b.action_task
+        @error "Fjage.pause() has been called outside of an action context!"
+    end
     block(b, millis)
-    yieldto(b.main_task)
+    yieldto(b.control_task)
 end
