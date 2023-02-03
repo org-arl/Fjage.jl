@@ -265,3 +265,57 @@ finally
   kill(master)
 
 end
+
+@testset "CoroutineBehavior" begin
+  c = Container()
+  start(c)
+
+  @agent struct MyAgent; end
+  a = MyAgent()
+  add(c, a)
+
+  @testset "delay" begin
+    # Test that delay indeed delays for at least as long as promised
+    dt = 100
+    t = zeros(Int, 10)
+    b = CoroutineBehavior() do a, b
+      for i in eachindex(t)
+        t[i] = currenttimemillis(a)
+        delay(b, dt)
+      end
+    end
+    add(a, b)
+    sleep(1.0 + length(t) * dt * 1e-3)
+
+    @test done(b)
+    @test all(diff(t) .>= dt)
+    @test !(b in a._behaviors)
+  end
+
+  @testset "stop" begin
+    # Test that CoroutineBehaviors can be stopped during delays
+    flag = false
+    b = CoroutineBehavior() do a, b
+      delay(b, 1000)
+      flag = true
+    end
+    add(a,b)
+    stop(b)
+    sleep(0.1)
+    @test !flag
+    @test done(b)
+    @test !(b in a._behaviors)
+  end
+
+  @testset "lock" begin
+    # Test that CoroutineBehaviors lock the agent while they are running
+    dt = 1000
+    t0 = currenttimemillis(a)
+    t1 = -1
+    add(a, CoroutineBehavior((a,b) -> sleep(dt*1e-3)))
+    add(a, OneShotBehavior((a,b) -> t1 = currenttimemillis(a)))
+    sleep(0.5 + dt*1e-3)
+    @show t0, t1
+    @test t1 - t0 > dt
+  end
+end
