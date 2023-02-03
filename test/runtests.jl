@@ -234,7 +234,7 @@ finally
 
 end
 
-@testset "TaskBehavior" begin
+@testset "CoroutineBehavior" begin
   c = Container()
   start(c)
 
@@ -242,14 +242,14 @@ end
   a = MyAgent()
   add(c, a)
 
-  @testset "pause" begin
-    # Test that pause indeed pauses for at least as long as promised
+  @testset "delay" begin
+    # Test that delay indeed delays for at least as long as promised
     dt = 100
     t = zeros(Int, 10)
-    b = TaskBehavior() do a, b
+    b = CoroutineBehavior() do a, b
       for i in eachindex(t)
         t[i] = currenttimemillis(a)
-        Fjage.pause(b, dt)
+        delay(b, dt)
       end
     end
     add(a, b)
@@ -261,10 +261,10 @@ end
   end
 
   @testset "stop" begin
-    # Test that TaskBehaviors can be stopped during pauses
+    # Test that CoroutineBehaviors can be stopped during delays
     flag = false
-    b = TaskBehavior() do a, b
-      Fjage.pause(b, 1000)
+    b = CoroutineBehavior() do a, b
+      delay(b, 1000)
       flag = true
     end
     add(a,b)
@@ -276,11 +276,11 @@ end
   end
 
   @testset "lock" begin
-    # Test that TaskBehaviors lock the agent while they are running
+    # Test that CoroutineBehaviors lock the agent while they are running
     dt = 1000
     t0 = currenttimemillis(a)
     t1 = -1
-    add(a, TaskBehavior((a,b) -> sleep(dt*1e-3)))
+    add(a, CoroutineBehavior((a,b) -> sleep(dt*1e-3)))
     add(a, OneShotBehavior((a,b) -> t1 = currenttimemillis(a)))
     sleep(0.5 + dt*1e-3)
     @show t0, t1
