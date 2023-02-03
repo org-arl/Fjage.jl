@@ -58,7 +58,7 @@ function action(b::TaskBehavior)
             reporterror(b.agent, e)
         end
         b.done = true
-        yieldto(b.main_task)
+        yieldto(b.control_task)
     end
     try
         while !b.done

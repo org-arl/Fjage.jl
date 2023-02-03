@@ -242,17 +242,48 @@ end
   a = MyAgent()
   add(c, a)
 
-  dt = 100
-  t = zeros(Int, 10)
-  b = TaskBehavior() do a, b
-    for i in eachindex(t)
-      t[i] = currenttimemillis(a)
-      Fjage.pause(b, dt)
+  @testset "pause" begin
+    # Test that pause indeed pauses for at least as long as promised
+    dt = 100
+    t = zeros(Int, 10)
+    b = TaskBehavior() do a, b
+      for i in eachindex(t)
+        t[i] = currenttimemillis(a)
+        Fjage.pause(b, dt)
+      end
     end
-  end
-  add(a, b)
-  sleep(0.5 + length(t) * dt * 1e-3)
+    add(a, b)
+    sleep(1.0 + length(t) * dt * 1e-3)
 
-  @test b.done
-  @test all(diff(t) .>= dt)
+    @test done(b)
+    @test all(diff(t) .>= dt)
+    @test !(b in a._behaviors)
+  end
+
+  @testset "stop" begin
+    # Test that TaskBehaviors can be stopped during pauses
+    flag = false
+    b = TaskBehavior() do a, b
+      Fjage.pause(b, 1000)
+      flag = true
+    end
+    add(a,b)
+    stop(b)
+    sleep(0.1)
+    @test !flag
+    @test done(b)
+    @test !(b in a._behaviors)
+  end
+
+  @testset "lock" begin
+    # Test that TaskBehaviors lock the agent while they are running
+    dt = 1000
+    t0 = currenttimemillis(a)
+    t1 = -1
+    add(a, TaskBehavior((a,b) -> sleep(dt*1e-3)))
+    add(a, OneShotBehavior((a,b) -> t1 = currenttimemillis(a)))
+    sleep(0.5 + dt*1e-3)
+    @show t0, t1
+    @test t1 - t0 > dt
+  end
 end
