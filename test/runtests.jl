@@ -322,11 +322,12 @@ end
 
 @testset "copy(::Message)" begin
   original = GenericMessage()
-  original.data = "test"
-  copied = copy(original)
+  original.data = [1,2,3]
+  cloned = clone(original)
 
-  @test copied.__clazz__ == original.__clazz__
-  @test typeof(copied) == typeof(original)
-  @test copied.msgID != original.msgID
-  @test copied.data == original.data
+  @test cloned.__clazz__ == original.__clazz__
+  @test typeof(cloned) == typeof(original)
+  @test cloned.msgID != original.msgID
+  @test cloned.data == original.data
+  @test cloned.data !== original.data
 end

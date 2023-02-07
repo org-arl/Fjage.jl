@@ -1,4 +1,4 @@
-export Performative, Message, GenericMessage, MessageClass, AbstractMessageClass, ParameterReq, ParameterRsp, set!
+export Performative, Message, GenericMessage, MessageClass, AbstractMessageClass, clone, ParameterReq, ParameterRsp, set!
 
 # global variables
 const _messageclasses = Dict{String,DataType}()
@@ -93,10 +93,10 @@ function AbstractMessageClass(context, clazz::String, performative=nothing)
   return rv
 end
 
-function Base.copy(original::Message)
-  copied = _messageclass_lookup(original.__clazz__)(original.__clazz__, copy(original.__data__))
-  copied.msgID = string(uuid4())
-  return copied
+function clone(original::Message)
+  cloned = _messageclass_lookup(original.__clazz__)(original.__clazz__, deepcopy(original.__data__))
+  cloned.msgID = string(uuid4())
+  return cloned
 end
 
 """
