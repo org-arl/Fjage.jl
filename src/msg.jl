@@ -93,6 +93,12 @@ function AbstractMessageClass(context, clazz::String, performative=nothing)
   return rv
 end
 
+function Base.copy(original::Message)
+  copied = _messageclass_lookup(original.__clazz__)(original.__clazz__, copy(original.__data__))
+  copied.msgID = string(uuid4())
+  return copied
+end
+
 """
     registermessages()
     registermessages(messageclasses)
