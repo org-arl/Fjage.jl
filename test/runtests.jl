@@ -320,7 +320,7 @@ end
   end
 end
 
-@testset "copy(::Message)" begin
+@testset "clone(::Message)" begin
   original = GenericMessage()
   original.data = [1,2,3]
   cloned = clone(original)
