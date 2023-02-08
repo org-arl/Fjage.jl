@@ -319,3 +319,15 @@ end
     @test t1 - t0 > dt
   end
 end
+
+@testset "clone(::Message)" begin
+  original = GenericMessage()
+  original.data = [1,2,3]
+  cloned = clone(original)
+
+  @test cloned.__clazz__ == original.__clazz__
+  @test typeof(cloned) == typeof(original)
+  @test cloned.msgID != original.msgID
+  @test cloned.data == original.data
+  @test cloned.data !== original.data
+end
