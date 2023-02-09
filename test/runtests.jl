@@ -315,7 +315,6 @@ end
     add(a, CoroutineBehavior((a,b) -> sleep(dt*1e-3)))
     add(a, OneShotBehavior((a,b) -> t1 = currenttimemillis(a)))
     sleep(0.5 + dt*1e-3)
-    @show t0, t1
     @test t1 - t0 > dt
   end
 end
