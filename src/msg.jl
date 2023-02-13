@@ -64,6 +64,11 @@ function MessageClass(context, clazz::String, superclass=nothing, performative=n
       end
     """),
     Meta.parse("""
+      function $(sname)(d::Dict{String, Any})
+        return $(tname)("$(clazz)", d)
+      end
+    """),
+    Meta.parse("""
       function $(sname)(; kwargs...)
         dict = Dict{String,Any}(
           "msgID" => string($(@__MODULE__).uuid4()),
