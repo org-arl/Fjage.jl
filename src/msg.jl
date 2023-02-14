@@ -65,6 +65,8 @@ function MessageClass(context, clazz::String, superclass=nothing, performative=n
     """),
     Meta.parse("""
       function $(sname)(d::Dict{String, Any})
+        get!(d, "msgID", string($(@__MODULE__).uuid4()))
+        get!(d, "perf", "$performative")
         return $(tname)("$(clazz)", d)
       end
     """),
