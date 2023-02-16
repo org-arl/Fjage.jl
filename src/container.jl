@@ -382,6 +382,9 @@ function add(c::Container, name::String, a::Agent)
   a._container = c
   a._aid = AgentID(name)
   c.agents[name] = a
+  if c isa SlaveContainer
+    _update_watch(c)
+  end
   c.running[] && init(a)
   @async _msgloop(a)
   @debug "Added agent $(name)::$(typeof(a))"
