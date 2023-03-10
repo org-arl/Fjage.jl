@@ -292,7 +292,7 @@ Send a message via the gateway to the specified agent. The `recipient` field of 
 populated with an agentID.
 """
 function send(gw::Gateway, msg)
-  isopen(gw,sock[]) || return false
+  isopen(gw.sock[]) || return false
   msg.sender = gw.agentID
   msg.sentAt = Dates.value(now())
   _prepare!(msg)
