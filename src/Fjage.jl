@@ -31,6 +31,7 @@ include("msg.jl")
 include("const.jl")
 include("gw.jl")
 include("container.jl")
+include("fsm.jl")
 include("coroutine_behavior.jl")
 
 end

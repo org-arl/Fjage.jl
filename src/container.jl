@@ -752,23 +752,23 @@ end
 """
 macro agent(sdef)
   if @capture(sdef, struct T_ <: P_ fields__ end)
-    push!(fields, :(_aid::Union{AgentID,Nothing} = nothing))
-    push!(fields, :(_container::Union{Container,Nothing} = nothing))
-    push!(fields, :(_behaviors::Set{Behavior} = Set{Behavior}()))
+    push!(fields, :(_aid::Union{Fjage.AgentID,Nothing} = nothing))
+    push!(fields, :(_container::Union{Fjage.Container,Nothing} = nothing))
+    push!(fields, :(_behaviors::Set{Fjage.Behavior} = Set{Fjage.Behavior}()))
     push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
-    push!(fields, :(_msgqueue::Vector{Message} = Message[]))
+    push!(fields, :(_msgqueue::Vector{Fjage.Message} = Fjage.Message[]))
     push!(fields, :(_processmsg::Threads.Condition = Threads.Condition()))
     push!(fields, :(_lock::ReentrantLock = ReentrantLock()))
     :( Base.@kwdef mutable struct $T <: $P; $(fields...); end ) |> esc
   elseif @capture(sdef, struct T_ fields__ end)
-    push!(fields, :(_aid::Union{AgentID,Nothing} = nothing))
-    push!(fields, :(_container::Union{Container,Nothing} = nothing))
-    push!(fields, :(_behaviors::Set{Behavior} = Set{Behavior}()))
+    push!(fields, :(_aid::Union{Fjage.AgentID,Nothing} = nothing))
+    push!(fields, :(_container::Union{Fjage.Container,Nothing} = nothing))
+    push!(fields, :(_behaviors::Set{Fjage.Behavior} = Set{Fjage.Behavior}()))
     push!(fields, :(_listeners::Vector{Tuple{Any,Channel,Int}} = Tuple{Any,Channel,Int}[]))
-    push!(fields, :(_msgqueue::Vector{Message} = Message[]))
+    push!(fields, :(_msgqueue::Vector{Fjage.Message} = Fjage.Message[]))
     push!(fields, :(_processmsg::Threads.Condition = Threads.Condition()))
     push!(fields, :(_lock::ReentrantLock = ReentrantLock()))
-    :( Base.@kwdef mutable struct $T <: Agent; $(fields...); end ) |> esc
+    :( Base.@kwdef mutable struct $T <: Fjage.Agent; $(fields...); end ) |> esc
   else
     @error "Bad agent definition"
   end
@@ -1266,7 +1266,7 @@ Base.show(io::IO, b::Behavior) = print(io, typeof(b), "/", name(b.agent))
 Add a behavior to an agent.
 """
 function add(a::Agent, b::Behavior)
-  (b.agent === nothing && b.done == false) || throw(ArgumentError("Behavior already running"))
+  (b.agent === nothing && !done(b)) || throw(ArgumentError("Behavior already running"))
   c = container(a)
   (c === nothing || !isrunning(c)) && throw(ArgumentError("Agent not running"))
   b.agent = a
@@ -1313,13 +1313,13 @@ using `restart(b)`. If `millis` is specified, the behavior is automatically
 restarted after `millis` milliseconds.
 """
 function block(b::Behavior)
-  b.done && return
+  done(b) && return
   b.block = Threads.Condition()
   nothing
 end
 
 function block(b::Behavior, millis)
-  b.done && return
+  done(b) && return
   b.block = Threads.Condition()
   b.timer = Timer(millis/1000)
   @async begin
@@ -1358,7 +1358,10 @@ reset, it may be reused later by adding it to an agent.
 """
 function reset(b::Behavior)
   b.agent === nothing || delete!(b.agent._behaviors, b)
+  b.timer === nothing || close(b.timer)
   b.agent = nothing
+  b.block = nothing
+  b.timer = nothing
   b.done = false
   nothing
 end
