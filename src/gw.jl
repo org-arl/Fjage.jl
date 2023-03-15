@@ -292,6 +292,7 @@ Send a message via the gateway to the specified agent. The `recipient` field of 
 populated with an agentID.
 """
 function send(gw::Gateway, msg)
+  isopen(gw.sock[]) || return false
   msg.sender = gw.agentID
   msg.sentAt = Dates.value(now())
   _prepare!(msg)
@@ -364,7 +365,7 @@ The `recipient` field of the request message (`msg`) must be populated with an a
 is specified in milliseconds, and defaults to 1 second if unspecified.
 """
 function request(gw::Gateway, msg, timeout=1000)
-  send(gw, msg)
+  send(gw, msg) || return nothing
   receive(gw, msg, timeout)
 end
 
