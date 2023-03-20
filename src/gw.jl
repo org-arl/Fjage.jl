@@ -11,8 +11,12 @@ struct Gateway
   sock::Ref{TCPSocket}
   subscriptions::Set{String}
   pending::Dict{String,Channel}
+
   msgqueue::Vector
   msgqueue_lock::Threads.Condition
+  # The nested lock is used to protect `msgqueue`.  Condition is used to signal
+  # 1) arrival of new messages, or 2) timeout of a `receive`.
+
   host::String
   port::Int
   reconnect::Ref{Bool}
