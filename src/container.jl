@@ -382,7 +382,7 @@ function add(c::Container, name::String, a::Agent)
   a._container = c
   a._aid = AgentID(name)
   c.agents[name] = a
-  c isa SlaveContainer && _update_watch(c)
+  c isa SlaveContainer && isrunning(c) && _update_watch(c)
   c.running[] && init(a)
   @async _msgloop(a)
   @debug "Added agent $(name)::$(typeof(a))"
@@ -459,6 +459,7 @@ function start(c::SlaveContainer)
   c.running[] = true
   c.initing[] = true
   foreach(kv -> init(kv[2]), c.agents)
+  _update_watch(c)
   @debug "SlaveContainer is running"
   # behaviors to be started and c.initing[] reset on _alive()
   @async _run(c)
