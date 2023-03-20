@@ -334,10 +334,14 @@ function receive(gw::Gateway, timeout::Int=0)
     if !isempty(gw.msgqueue)
       return popfirst!(gw.msgqueue)
     end
-    timer = Timer(timeout/1e3)
+    if timeout == 0
+      return nothing
+    end
+    done = false
     if timeout > 0
       @async begin
-        wait(timer)
+        sleep(timeout/1e3)
+        done = true
         lock(gw.msgqueue_lock) do
           notify(gw.msgqueue_lock)
         end
@@ -346,10 +350,9 @@ function receive(gw::Gateway, timeout::Int=0)
     while true
       wait(gw.msgqueue_lock)
       if !isempty(gw.msgqueue)
-        close(timer)
         return popfirst!(gw.msgqueue)
       end
-      if !isopen(timer)
+      if done
         return nothing
       end
     end
@@ -363,10 +366,14 @@ function receive(gw::Gateway, filt, timeout=0)
         return msg
       end
     end
-    timer = Timer(timeout/1e3)
+    if timeout == 0
+      return nothing
+    end
+    done = false
     if timeout > 0
       @async begin
-        wait(timer)
+        sleep(timeout/1e3)
+        done = true
         lock(gw.msgqueue_lock) do
           notify(gw.msgqueue_lock)
         end
@@ -375,10 +382,9 @@ function receive(gw::Gateway, filt, timeout=0)
     while true
       wait(gw.msgqueue_lock)
       if !isempty(gw.msgqueue) && _matches(filt, last(gw.msgqueue))
-        close(timer)
         return pop!(gw.msgqueue)
       end
-      if !isopen(timer)
+      if done
         return nothing
       end
       notify(gw.msgqueue_lock)
