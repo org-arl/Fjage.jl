@@ -11,7 +11,8 @@ struct Gateway
   sock::Ref{TCPSocket}
   subscriptions::Set{String}
   pending::Dict{String,Channel}
-  queue::Channel
+  msgqueue::Vector
+  msgqueue_lock::Threads.Condition
   host::String
   port::Int
   reconnect::Ref{Bool}
@@ -21,7 +22,8 @@ struct Gateway
       Ref(connect(host, port)),
       Set{String}(),
       Dict{String,Channel}(),
-      Channel(MAX_QUEUE_LEN),
+      Vector(),
+      Threads.Condition(),
       host, port, Ref(reconnect)
     )
     @async _run(gw)
@@ -80,10 +82,11 @@ _shutdown(gw::Gateway) = close(gw)
 _alive(gw::Gateway) = nothing
 
 function _deliver(gw::Gateway, msg::Message, relay::Bool)
-  while length(gw.queue.data) >= MAX_QUEUE_LEN
-    take!(gw.queue)
+  lock(gw.msgqueue_lock) do
+    push!(gw.msgqueue, msg)
+    deleteat!(gw.msgqueue, 1:(length(gw.msgqueue) - MAX_QUEUE_LEN))
+    notify(gw.msgqueue_lock)
   end
-  put!(gw.queue, msg)
 end
 
 # update master container about changes to recipient watch list
@@ -323,37 +326,59 @@ it must take in a message and return `true` or `false`. A message for which it r
 `true` is retrieved.
 """
 function receive(gw::Gateway, timeout::Int=0)
-  isready(gw.queue) && return take!(gw.queue)
-  timeout == 0 && return nothing
-  waiting = true
-  if timeout > 0
-    @async begin
-      sleep(timeout/1000.0)
-      waiting && push!(gw.queue, nothing)
+  lock(gw.msgqueue_lock) do
+    if !isempty(gw.msgqueue)
+      return popfirst!(gw.msgqueue)
+    end
+    timer = Timer(timeout/1e3)
+    if timeout > 0
+      @async begin
+        wait(timer)
+        lock(gw.msgqueue_lock) do
+          notify(gw.msgqueue_lock)
+        end
+      end
+    end
+    while true
+      wait(gw.msgqueue_lock)
+      if !isempty(gw.msgqueue)
+        close(timer)
+        return popfirst!(gw.msgqueue)
+      end
+      if !isopen(timer)
+        return nothing
+      end
     end
   end
-  rv = take!(gw.queue)
-  waiting = false
-  rv
 end
 
 function receive(gw::Gateway, filt, timeout=0)
-  t1 = now() + Millisecond(timeout)
-  cache = []
-  while true
-    msg = receive(gw, (t1-now()).value)
-    if _matches(filt, msg)
-      if length(cache) > 0
-        while isready(gw.queue)
-          push!(cache, take!(gw.queue))
-        end
-        for m in cache
-          push!(gw.queue, m)
+  lock(gw.msgqueue_lock) do
+    for msg in gw.msgqueue
+      if _matches(filt, msg)
+        return msg
+      end
+    end
+    timer = Timer(timeout/1e3)
+    if timeout > 0
+      @async begin
+        wait(timer)
+        lock(gw.msgqueue_lock) do
+          notify(gw.msgqueue_lock)
         end
       end
-      return msg
     end
-    push!(cache, msg)
+    while true
+      wait(gw.msgqueue_lock)
+      if !isempty(gw.msgqueue) && _matches(filt, last(gw.msgqueue))
+        close(timer)
+        return pop!(gw.msgqueue)
+      end
+      if !isopen(timer)
+        return nothing
+      end
+      notify(gw.msgqueue_lock)
+    end
   end
 end
 
@@ -371,8 +396,8 @@ end
 
 "Flush the incoming message queue."
 function Base.flush(gw::Gateway)
-  while isready(gw.queue)
-    take!(gw.queue)
+  lock(gw.msgqueue_lock) do
+    empty!(gw.msgqueue)
   end
   nothing
 end
