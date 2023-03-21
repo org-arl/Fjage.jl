@@ -8,12 +8,12 @@ using Base64
 println("Starting fjåge...")
 cp = replace(read(`find lib -name '*.jar'`, String), "\n" => ":")
 master = open(`java -cp $cp org.arl.fjage.shell.GroovyBoot etc/initrc.groovy`)
-sleep(2)
-
-# tests
-
-println("Starting tests...")
 try
+  sleep(2)
+
+  # tests
+
+  println("Starting tests...")
 
   @testset "Fjage" begin
 
