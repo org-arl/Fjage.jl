@@ -61,12 +61,38 @@ try
       @test isa(MyReq(), MyAbstractReq)
     end
 
-    @testset "send & receive (gw)" begin
+    @testset "send & receive (gw, blocking)" begin
       flush(gw)
+      channel = Channel()
+      errormonitor(@async put!(channel, receive(gw, 1000)))
+      yield()
       send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
-      rsp = receive(gw, 1000)
+      rsp = take!(channel)
       @test typeof(rsp) <: Message
       @test rsp.performative == "AGREE"
+
+      # Make sure response is removed
+      rsp = receive(gw)
+      @test isnothing(rsp)
+    end
+
+    @testset "send & receive (gw, nonblocking)" begin
+      flush(gw)
+      send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
+      rsp = nothing
+      for _ = 1:10
+        rsp = receive(gw)
+        if !isnothing(rsp)
+          break
+        end
+        sleep(0.1)
+      end
+      @test typeof(rsp) <: Message
+      @test rsp.performative == "AGREE"
+
+      # Make sure response is removed
+      rsp = receive(gw)
+      @test isnothing(rsp)
     end
 
     @testset "send & receive (aid)" begin
@@ -137,11 +163,36 @@ try
       @test typeof(msg) <: ShellExecReq
     end
 
-    @testset "receive (filt, +)" begin
+    @testset "receive (filt, +, blocking)" begin
+      flush(gw)
+      channel = Channel()
+      errormonitor(@async put!(channel, receive(gw, ShellExecReq, 1000)))
+      yield()
+      send(ntf, ShellExecReq(cmd="1+2"))
+      msg = take!(channel)
+      @test typeof(msg) <: ShellExecReq
+
+      # Make sure response is removed
+      msg = receive(gw, ShellExecReq)
+      @test isnothing(msg)
+    end
+
+    @testset "receive (filt, +, nonblocking)" begin
       flush(gw)
       send(ntf, ShellExecReq(cmd="1+2"))
-      msg = receive(gw, ShellExecReq, 1000)
+      msg = nothing
+      for _ = 1:10
+        msg = receive(gw, ShellExecReq)
+        if !isnothing(msg)
+          break
+        end
+        sleep(0.1)
+      end
       @test typeof(msg) <: ShellExecReq
+
+      # Make sure response is removed
+      msg = receive(gw, ShellExecReq)
+      @test isnothing(msg)
     end
 
     UnknownReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.UnknownReq")
