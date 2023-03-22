@@ -88,9 +88,9 @@ _alive(gw::Gateway) = nothing
 function _deliver(gw::Gateway, msg::Message, relay::Bool)
   lock(gw.msgqueue_lock) do
     for (idx, (filt, task, _)) in pairs(gw.tasks_waiting_for_msg)
-      if _matches(filt, msg)
+      schedule(task, (current_task(), msg))
+      if wait()
         deleteat!(gw.tasks_waiting_for_msg, idx)
-        schedule(task, msg)
         return
       end
     end
@@ -367,7 +367,15 @@ function receive(gw::Gateway, filt, timeout=0)
       push!(gw.tasks_waiting_for_msg, (filt, current_task(), receive_id))
       return nothing
     end,
-    Some(wait())
+    while true
+      delivery_task, msg = @something(wait(), return nothing)
+      if _matches(filt, msg)
+        schedule(delivery_task, true)
+        return msg
+      else
+        schedule(delivery_task, false)
+      end
+    end
   )
 end
 
