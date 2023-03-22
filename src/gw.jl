@@ -329,40 +329,13 @@ field is set to the `msgID` of the specified message is retrieved. If it is a fu
 it must take in a message and return `true` or `false`. A message for which it returns
 `true` is retrieved.
 """
-function receive(gw::Gateway, timeout::Int=0)
-  lock(gw.msgqueue_lock) do
-    if !isempty(gw.msgqueue)
-      return popfirst!(gw.msgqueue)
-    end
-    if timeout == 0
-      return nothing
-    end
-    done = false
-    if timeout > 0
-      @async begin
-        sleep(timeout/1e3)
-        done = true
-        lock(gw.msgqueue_lock) do
-          notify(gw.msgqueue_lock)
-        end
-      end
-    end
-    while true
-      wait(gw.msgqueue_lock)
-      if !isempty(gw.msgqueue)
-        return popfirst!(gw.msgqueue)
-      end
-      if done
-        return nothing
-      end
-    end
-  end
-end
+receive(gw::Gateway, timeout::Int=0) = receive(gw, msg->true, timeout)
 
 function receive(gw::Gateway, filt, timeout=0)
   lock(gw.msgqueue_lock) do
-    for msg in gw.msgqueue
+    for (idx,msg) in pairs(gw.msgqueue)
       if _matches(filt, msg)
+        deleteat!(gw.msgqueue, idx)
         return msg
       end
     end
@@ -381,8 +354,11 @@ function receive(gw::Gateway, filt, timeout=0)
     end
     while true
       wait(gw.msgqueue_lock)
-      if !isempty(gw.msgqueue) && _matches(filt, last(gw.msgqueue))
-        return pop!(gw.msgqueue)
+      for (idx,msg) in pairs(gw.msgqueue)
+        if _matches(filt, msg)
+          deleteat!(gw.msgqueue, idx)
+          return msg
+        end
       end
       if done
         return nothing
