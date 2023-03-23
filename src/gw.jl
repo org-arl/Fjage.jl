@@ -13,7 +13,7 @@ struct Gateway
   pending::Dict{String,Channel}
 
   msgqueue::Vector
-  tasks_waiting_for_msg::Vector{Tuple{#=filter::=#Any,Task,#=receive_id::=#Int}}
+  tasks_waiting_for_msg::Vector{Tuple{Task,#=receive_id::=#Int}}
   msgqueue_lock::ReentrantLock # Protects both msgqueue and tasks_waiting_for_msg
 
   host::String
@@ -26,7 +26,7 @@ struct Gateway
       Set{String}(),
       Dict{String,Channel}(),
       Vector(),
-      Vector{Tuple{Any,Task,Int}}(),
+      Vector{Tuple{Task,Int}}(),
       ReentrantLock(),
       host, port, Ref(reconnect)
     )
@@ -87,7 +87,9 @@ _alive(gw::Gateway) = nothing
 
 function _deliver(gw::Gateway, msg::Message, relay::Bool)
   lock(gw.msgqueue_lock) do
-    for (idx, (filt, task, _)) in pairs(gw.tasks_waiting_for_msg)
+    for (idx, (task, _)) in pairs(gw.tasks_waiting_for_msg)
+      # Check if message matches the filter. This has to happen on the receiver
+      # task because the this task may run in a different world age.
       schedule(task, (current_task(), msg))
       if wait()
         deleteat!(gw.tasks_waiting_for_msg, idx)
@@ -354,7 +356,11 @@ function receive(gw::Gateway, filt, timeout=0)
         @async begin
           sleep(timeout/1e3)
           lock(gw.msgqueue_lock) do
-            for (idx, (_, _, id)) in pairs(gw.tasks_waiting_for_msg)
+            for (idx, (_, id)) in pairs(gw.tasks_waiting_for_msg)
+              # We must identify the receive to remove from the waiting list
+              # based on the receive ID and not the task because the task which
+              # started this one may have had its previous receive satisfied and
+              # is waiting for a new receive.
               if id == receive_id
                 deleteat!(gw.tasks_waiting_for_msg, idx)
                 schedule($(current_task()), nothing)
@@ -362,9 +368,9 @@ function receive(gw::Gateway, filt, timeout=0)
               end
             end
           end
-        end |> errormonitor
+        end
       end
-      push!(gw.tasks_waiting_for_msg, (filt, current_task(), receive_id))
+      push!(gw.tasks_waiting_for_msg, (current_task(), receive_id))
       return nothing
     end,
     while true
