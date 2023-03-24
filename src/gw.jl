@@ -89,7 +89,7 @@ function _deliver(gw::Gateway, msg::Message, relay::Bool)
   lock(gw.msgqueue_lock) do
     for (idx, (task, _)) in pairs(gw.tasks_waiting_for_msg)
       # Check if message matches the filter. This has to happen on the receiver
-      # task because the this task may run in a different world age.
+      # task because this task may run in a different world age.
       schedule(task, (current_task(), msg))
       if wait()
         deleteat!(gw.tasks_waiting_for_msg, idx)
