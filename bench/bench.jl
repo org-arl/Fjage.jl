@@ -27,7 +27,7 @@ function benchmark_gateway_send_receive()
     gw = dead_gateway()
     @benchmark begin
         Fjage._deliver($gw, $(GenericMessage()), false)
-        receive($gw)
+        @assert !isnothing(receive($gw))
     end
 end
 
@@ -38,7 +38,7 @@ function benchmark_gateway_receive_send()
         cond = Threads.Event(true)
         @async begin
             while !done[]
-                receive(gw, BLOCKING)
+                @assert !isnothing(receive(gw, BLOCKING))
                 notify(cond)
             end
         end
