@@ -41,14 +41,14 @@ CountFilter(target) = CountFilter(target, 0)
 
 function benchmark_gateway_send_receive_full_queue()
     gw = dead_gateway()
-    for _ in 1:256
+    for _ in 1:Fjage.MAX_QUEUE_LEN
         Fjage._deliver(gw, GenericMessage(), false)
     end
     @benchmark begin
         Fjage._deliver($gw, $(GenericMessage()), false)
         @assert !isnothing(receive(
             $gw,
-            CountFilter(256)
+            CountFilter(Fjage.MAX_QUEUE_LEN)
         ))
     end
 end
