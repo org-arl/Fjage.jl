@@ -31,6 +31,28 @@ function benchmark_gateway_send_receive()
     end
 end
 
+mutable struct CountFilter <: Function
+    target::Int
+    counter::Int
+end
+
+CountFilter(target) = CountFilter(target, 0)
+(filter::CountFilter)(_) = (filter.counter += 1) == filter.target
+
+function benchmark_gateway_send_receive_full_queue()
+    gw = dead_gateway()
+    for _ in 1:256
+        Fjage._deliver(gw, GenericMessage(), false)
+    end
+    @benchmark begin
+        Fjage._deliver($gw, $(GenericMessage()), false)
+        @assert !isnothing(receive(
+            $gw,
+            CountFilter(256)
+        ))
+    end
+end
+
 function benchmark_gateway_receive_send()
     gw = dead_gateway()
     done = Threads.Atomic{Bool}(false)
@@ -102,6 +124,7 @@ function report_send_receive()
     for (label, bench) in (
         ("Gateway, send -> receive",                  benchmark_gateway_send_receive),
         ("Channel, send -> receive (for comparison)", benchmark_channel_send_receive),
+        ("Gateway, send -> receive, full queue",      benchmark_gateway_send_receive_full_queue),
         ("Gateway, receive -> send",                  benchmark_gateway_receive_send),
         ("Channel, receive -> send (for comparison)", benchmark_channel_receive_send),
         ("Event ping pong (for comparison)",          benchmark_event_ping_pong),
