@@ -104,16 +104,19 @@ end
 function benchmark_event_ping_pong()
     done = Threads.Atomic{Bool}(false)
     try
-        cond = Threads.Event(true)
+        events = (
+            Threads.Event(true),
+            Threads.Event(true),
+        )
         @async begin
             while !done[]
-                notify(cond)
-                wait(cond)
+                notify(events[1])
+                wait(events[2])
             end
         end
         @benchmark begin
-            wait($cond)
-            notify($cond)
+            wait($events[1])
+            notify($events[2])
         end
     finally
         done[] = true
