@@ -53,14 +53,18 @@ function benchmark_gateway_send_receive_full_queue()
     end
 end
 
-function benchmark_gateway_receive_send()
+function benchmark_gateway_receive_send(n_receivers::Integer = 1)
+    @assert n_receivers > 0
     gw = dead_gateway()
     done = Threads.Atomic{Bool}(false)
-    try
+    @sync try
         cond = Threads.Event(true)
+        for _ = 1:n_receivers-1
+            @async receive(gw, msg->false, BLOCKING)
+        end
         @async begin
             while !done[]
-                @assert !isnothing(receive(gw, BLOCKING))
+                @assert !isnothing(receive(gw, BLOCKING)) || done[]
                 notify(cond)
             end
         end
@@ -70,6 +74,12 @@ function benchmark_gateway_receive_send()
         end
     finally
         done[] = true
+        # One more message to make sure the active receiver shuts down
+        Fjage._deliver(gw, GenericMessage(), false)
+        # Close all the passive receivers
+        for (task,_) in gw.tasks_waiting_for_msg
+            schedule(task, nothing)
+        end
     end
 end
 
@@ -131,6 +141,7 @@ function report_send_receive()
         ("Gateway, receive -> send",                  benchmark_gateway_receive_send),
         ("Channel, receive -> send (for comparison)", benchmark_channel_receive_send),
         ("Event ping pong (for comparison)",          benchmark_event_ping_pong),
+        ("Gateway, receive -> send with 3 receivers", ()->benchmark_gateway_receive_send(3)),
     )
         println()
         printstyled("-"^length(label), "\n"; bold = true)
