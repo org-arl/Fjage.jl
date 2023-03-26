@@ -94,7 +94,7 @@ end
 function benchmark_channel_receive_send()
     ch = Channel{Any}(Inf)
     done = Threads.Atomic{Bool}(false)
-    try
+    @sync try
         cond = Threads.Event(true)
         @async begin
             while !done[]
@@ -108,16 +108,17 @@ function benchmark_channel_receive_send()
         end
     finally
         done[] = true
+        put!(ch, GenericMessage())
     end
 end
 
 function benchmark_event_ping_pong()
     done = Threads.Atomic{Bool}(false)
-    try
-        events = (
-            Threads.Event(true),
-            Threads.Event(true),
-        )
+    events = (
+        Threads.Event(true),
+        Threads.Event(true),
+    )
+    @sync try
         @async begin
             while !done[]
                 notify(events[1])
@@ -130,6 +131,7 @@ function benchmark_event_ping_pong()
         end
     finally
         done[] = true
+        notify(events[2])
     end
 end
 
