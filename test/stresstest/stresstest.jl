@@ -119,7 +119,7 @@ end
 axis = Axis(figure[2,1];
     title = "Timeout accuracy",
     xlabel = "requested timeout [sec]",
-    ylabel = "timeout accuracy[sec]",
+    ylabel = "timeout accuracy [sec]",
 )
 for receiver in 1:n_receivers
     scatter!(
