@@ -339,7 +339,7 @@ it must take in a message and return `true` or `false`. A message for which it r
 """
 receive(gw::Gateway, timeout::Int=0) = receive(gw, msg->true, timeout)
 
-receive_counter::Threads.Atomic{Int} = Threads.Atomic{Int}(0)
+const receive_counter = Threads.Atomic{Int}(0)
 function receive(gw::Gateway, filt, timeout=0)
   receive_id = (receive_counter[] += 1)
   return @something(
