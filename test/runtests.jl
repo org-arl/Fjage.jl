@@ -64,7 +64,7 @@ try
     @testset "send & receive (gw, blocking)" begin
       flush(gw)
       channel = Channel()
-      errormonitor(@async put!(channel, receive(gw, 1000)))
+      @async put!(channel, receive(gw, 1000))
       yield()
       send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
       rsp = take!(channel)
@@ -166,7 +166,7 @@ try
     @testset "receive (filt, +, blocking)" begin
       flush(gw)
       channel = Channel()
-      errormonitor(@async put!(channel, receive(gw, ShellExecReq, 1000)))
+      @async put!(channel, receive(gw, ShellExecReq, 1000))
       yield()
       send(ntf, ShellExecReq(cmd="1+2"))
       msg = take!(channel)

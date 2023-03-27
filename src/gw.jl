@@ -342,47 +342,52 @@ receive(gw::Gateway, timeout::Int=0) = receive(gw, msg->true, timeout)
 const receive_counter = Threads.Atomic{Int}(0)
 function receive(gw::Gateway, filt, timeout=0)
   receive_id = (receive_counter[] += 1)
-  return @something(
-    lock(gw.msgqueue_lock) do
-      for (idx, msg) in pairs(gw.msgqueue)
-        if _matches(filt, msg)
-          return Some(popat!(gw.msgqueue, idx))
-        end
+  maybe_msg = lock(gw.msgqueue_lock) do
+    for (idx, msg) in pairs(gw.msgqueue)
+      if _matches(filt, msg)
+        return Some(popat!(gw.msgqueue, idx))
       end
-      if timeout == 0
-        return Some(nothing)
-      end
-      if timeout > 0
-        @async begin
-          sleep(timeout/1e3)
-          lock(gw.msgqueue_lock) do
-            for (idx, (_, id)) in pairs(gw.tasks_waiting_for_msg)
-              # We must identify the receive to remove from the waiting list
-              # based on the receive ID and not the task because the task which
-              # started this one may have had its previous receive satisfied and
-              # is waiting for a new receive.
-              if id == receive_id
-                deleteat!(gw.tasks_waiting_for_msg, idx)
-                schedule($(current_task()), nothing)
-                break
-              end
+    end
+    if timeout == 0
+      return Some(nothing)
+    end
+    if timeout > 0
+      @async begin
+        sleep(timeout/1e3)
+        lock(gw.msgqueue_lock) do
+          for (idx, (_, id)) in pairs(gw.tasks_waiting_for_msg)
+            # We must identify the receive to remove from the waiting list
+            # based on the receive ID and not the task because the task which
+            # started this one may have had its previous receive satisfied and
+            # is waiting for a new receive.
+            if id == receive_id
+              deleteat!(gw.tasks_waiting_for_msg, idx)
+              schedule($(current_task()), nothing)
+              break
             end
           end
         end
       end
-      push!(gw.tasks_waiting_for_msg, (current_task(), receive_id))
-      return nothing
-    end,
-    while true
-      delivery_task, msg = @something(wait(), return nothing)
-      if _matches(filt, msg)
-        schedule(delivery_task, true)
-        return msg
-      else
-        schedule(delivery_task, false)
-      end
     end
-  )
+    push!(gw.tasks_waiting_for_msg, (current_task(), receive_id))
+    return nothing
+  end
+  if !isnothing(maybe_msg)
+    return something(maybe_msg)
+  end
+  while true
+    maybe_task_and_msg = wait()
+    if isnothing(maybe_task_and_msg)
+      return nothing
+    end
+    delivery_task, msg = maybe_task_and_msg
+    if _matches(filt, msg)
+      schedule(delivery_task, true)
+      return msg
+    else
+      schedule(delivery_task, false)
+    end
+  end
 end
 
 """
