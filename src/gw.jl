@@ -11,7 +11,11 @@ struct Gateway
   sock::Ref{TCPSocket}
   subscriptions::Set{String}
   pending::Dict{String,Channel}
-  queue::Channel
+
+  msgqueue::Vector
+  tasks_waiting_for_msg::Vector{Tuple{Task,#=receive_id::=#Int}}
+  msgqueue_lock::ReentrantLock # Protects both msgqueue and tasks_waiting_for_msg
+
   host::String
   port::Int
   reconnect::Ref{Bool}
@@ -21,7 +25,9 @@ struct Gateway
       Ref(connect(host, port)),
       Set{String}(),
       Dict{String,Channel}(),
-      Channel(MAX_QUEUE_LEN),
+      Vector(),
+      Vector{Tuple{Task,Int}}(),
+      ReentrantLock(),
       host, port, Ref(reconnect)
     )
     @async _run(gw)
@@ -80,10 +86,19 @@ _shutdown(gw::Gateway) = close(gw)
 _alive(gw::Gateway) = nothing
 
 function _deliver(gw::Gateway, msg::Message, relay::Bool)
-  while length(gw.queue.data) >= MAX_QUEUE_LEN
-    take!(gw.queue)
+  lock(gw.msgqueue_lock) do
+    for (idx, (task, _)) in pairs(gw.tasks_waiting_for_msg)
+      # Check if message matches the filter. This has to happen on the receiver
+      # task because this task may run in a different world age.
+      schedule(task, (current_task(), msg))
+      if wait()
+        deleteat!(gw.tasks_waiting_for_msg, idx)
+        return
+      end
+    end
+    push!(gw.msgqueue, msg)
+    deleteat!(gw.msgqueue, 1:(length(gw.msgqueue) - MAX_QUEUE_LEN))
   end
-  put!(gw.queue, msg)
 end
 
 # update master container about changes to recipient watch list
@@ -322,38 +337,56 @@ field is set to the `msgID` of the specified message is retrieved. If it is a fu
 it must take in a message and return `true` or `false`. A message for which it returns
 `true` is retrieved.
 """
-function receive(gw::Gateway, timeout::Int=0)
-  isready(gw.queue) && return take!(gw.queue)
-  timeout == 0 && return nothing
-  waiting = true
-  if timeout > 0
-    @async begin
-      sleep(timeout/1000.0)
-      waiting && push!(gw.queue, nothing)
-    end
-  end
-  rv = take!(gw.queue)
-  waiting = false
-  rv
-end
+receive(gw::Gateway, timeout::Int=0) = receive(gw, msg->true, timeout)
 
+const receive_counter = Threads.Atomic{Int}(0)
 function receive(gw::Gateway, filt, timeout=0)
-  t1 = now() + Millisecond(timeout)
-  cache = []
-  while true
-    msg = receive(gw, (t1-now()).value)
-    if _matches(filt, msg)
-      if length(cache) > 0
-        while isready(gw.queue)
-          push!(cache, take!(gw.queue))
-        end
-        for m in cache
-          push!(gw.queue, m)
+  receive_id = (receive_counter[] += 1)
+  maybe_msg = lock(gw.msgqueue_lock) do
+    for (idx, msg) in pairs(gw.msgqueue)
+      if _matches(filt, msg)
+        return Some(popat!(gw.msgqueue, idx))
+      end
+    end
+    if timeout == 0
+      return Some(nothing)
+    end
+    if timeout > 0
+      @async begin
+        sleep(timeout/1e3)
+        lock(gw.msgqueue_lock) do
+          for (idx, (_, id)) in pairs(gw.tasks_waiting_for_msg)
+            # We must identify the receive to remove from the waiting list
+            # based on the receive ID and not the task because the task which
+            # started this one may have had its previous receive satisfied and
+            # is waiting for a new receive.
+            if id == receive_id
+              deleteat!(gw.tasks_waiting_for_msg, idx)
+              schedule($(current_task()), nothing)
+              break
+            end
+          end
         end
       end
-      return msg
     end
-    push!(cache, msg)
+    push!(gw.tasks_waiting_for_msg, (current_task(), receive_id))
+    return nothing
+  end
+  if !isnothing(maybe_msg)
+    return something(maybe_msg)
+  end
+  while true
+    maybe_task_and_msg = wait()
+    if isnothing(maybe_task_and_msg)
+      return nothing
+    end
+    delivery_task, msg = maybe_task_and_msg
+    if _matches(filt, msg)
+      schedule(delivery_task, true)
+      return msg
+    else
+      schedule(delivery_task, false)
+    end
   end
 end
 
@@ -371,8 +404,8 @@ end
 
 "Flush the incoming message queue."
 function Base.flush(gw::Gateway)
-  while isready(gw.queue)
-    take!(gw.queue)
+  lock(gw.msgqueue_lock) do
+    empty!(gw.msgqueue)
   end
   nothing
 end
