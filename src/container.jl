@@ -687,7 +687,7 @@ _agents_types(c::SlaveContainer) = [(k, string(typeof(v))) for (k, v) ∈ c.agen
 _subscriptions(c::SlaveContainer) = collect(string.(keys(c.topics)))
 _services(c::SlaveContainer) = collect(keys(c.services))
 
-function _agentsforservice(c::SlaveContainer, svc::String)
+function _agentsforservice(c::Container, svc::String)
   svc ∈ keys(c.services) || return AgentID[]
   collect(c.services[svc])
 end
