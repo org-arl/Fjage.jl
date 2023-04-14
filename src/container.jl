@@ -56,7 +56,8 @@ end
 
 reporterror(ex) = reporterror(nothing, ex)
 
-function reconnect(c, ex)
+reconnect(c::StandaloneContainer, ex) = false
+function reconnect(c::SlaveContainer, ex)
   c.reconnect[] || return false
   isopen(c.sock[]) && return false
   ex isa IOError || return false
