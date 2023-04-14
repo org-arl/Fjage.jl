@@ -329,14 +329,16 @@ end
     # Test that delay indeed delays for at least as long as promised
     dt = 100
     t = zeros(Int, 10)
+    cond = Threads.Condition()
     b = CoroutineBehavior() do a, b
       for i in eachindex(t)
         t[i] = currenttimemillis(a)
         delay(b, dt)
       end
+      lock(()->notify(cond), cond)
     end
     add(a, b)
-    sleep(1.0 + length(t) * dt * 1e-3)
+    lock(()->wait(cond), cond)
 
     @test done(b)
     @test all(diff(t) .>= dt)
