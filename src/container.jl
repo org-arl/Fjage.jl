@@ -37,34 +37,6 @@ function loglevel!(level)
   throw(ArgumentError("Bad loglevel (allowed values are :debug, :info, :warn, :error, :none)"))
 end
 
-### stacktrace pretty printing & auto-reconnection
-
-function reporterror(src, ex)
-  fname = basename(@__FILE__)
-  bt = String[]
-  for s ∈ stacktrace(catch_backtrace())
-    push!(bt, "    $s")
-    basename(string(s.file)) == fname && s.func == :run && break
-  end
-  bts = join(bt, '\n')
-  if src === nothing
-    @error "$(ex)\n  Stack trace:\n$(bts)"
-  else
-    @error "[$(src)] $(ex)\n  Stack trace:\n$(bts)"
-  end
-end
-
-reporterror(ex) = reporterror(nothing, ex)
-
-function reconnect(c, ex)
-  c.reconnect[] || return false
-  isopen(c.sock[]) && return false
-  ex isa IOError || return false
-  @warn "Connection lost..."
-  close(c.sock[])
-  true
-end
-
 ### realtime platform
 
 "Real-time platform."
@@ -722,6 +694,35 @@ function _deliver(c::SlaveContainer, msg::Message, relay::Bool)
 end
 
 _deliver(c::SlaveContainer, msg::Message) = _deliver(c, msg, true)
+
+### stacktrace pretty printing & auto-reconnection
+
+function reporterror(src, ex)
+  fname = basename(@__FILE__)
+  bt = String[]
+  for s ∈ stacktrace(catch_backtrace())
+    push!(bt, "    $s")
+    basename(string(s.file)) == fname && s.func == :run && break
+  end
+  bts = join(bt, '\n')
+  if src === nothing
+    @error "$(ex)\n  Stack trace:\n$(bts)"
+  else
+    @error "[$(src)] $(ex)\n  Stack trace:\n$(bts)"
+  end
+end
+
+reporterror(ex) = reporterror(nothing, ex)
+
+reconnect(c::StandaloneContainer, ex) = false
+function reconnect(c::SlaveContainer, ex)
+  c.reconnect[] || return false
+  isopen(c.sock[]) && return false
+  ex isa IOError || return false
+  @warn "Connection lost..."
+  close(c.sock[])
+  true
+end
 
 ### agent
 
