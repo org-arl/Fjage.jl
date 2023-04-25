@@ -574,23 +574,23 @@ function deregister(c::Container, aid::AgentID, svc::String)
 end
 
 """
-    agentforservice(c::Container, svc::String, owner::AgentID)
+    agentforservice(c::Container, svc::String, owner::Agent)
 
 Lookup any agent providing the service `svc`, and return an `AgentID` owned
 by `owner`. Returns `nothing` if no agent providing specified service found.
 """
-function agentforservice(c::StandaloneContainer, svc::String, owner::AgentID)
+function agentforservice(c::StandaloneContainer, svc::String, owner::Agent)
   svc ∈ keys(c.services) || return nothing
   AgentID(first(c.services[svc]).name, false, owner)
 end
 
 """
-    agentsforservice(c::Container, svc::String, owner::AgentID)
+    agentsforservice(c::Container, svc::String, owner::Agent)
 
 Lookup all agents providing the service `svc`, and return list of `AgentID` owned
 by `owner`. Returns an empty list if no agent providing specified service found.
 """
-function agentsforservice(c::StandaloneContainer, svc::String, owner::AgentID)
+function agentsforservice(c::StandaloneContainer, svc::String, owner::Agent)
   svc ∈ keys(c.services) || return AgentID[]
   [AgentID(s.name, false, owner) for s ∈ c.services[svc]]
 end
