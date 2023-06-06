@@ -369,7 +369,7 @@ Extract parameter `param` from a parameter response message.
 function Base.get(p::ParameterRsp, key)
   skey = string(key)
   dskey = "." * skey
-  (p.param == skey || endswith(p.param, dskey)) && return p.value
+  (!isnothing(p.param) && (p.param == skey || endswith(p.param, dskey))) && return p.value
   vals = p.values
   if vals !== nothing
     for (k, v) ∈ vals
