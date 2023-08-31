@@ -181,6 +181,7 @@ struct SlaveContainer{T <: Platform} <: Container
   host::String
   port::Int
   reconnect::Ref{Bool}
+  ownsplatform::Bool
 end
 
 """
@@ -208,12 +209,12 @@ Create a slave container running on a real-time platform (if unspecified),
 optionally with a specified name. If a name is not specified, a unique name
 is randomly generated.
 """
-SlaveContainer(host, port; reconnect=true) = SlaveContainer(RealTimePlatform(), host, port; reconnect=reconnect)
-SlaveContainer(host, port, name; reconnect=true) = SlaveContainer(RealTimePlatform(), host, port, name; reconnect=reconnect)
+SlaveContainer(host, port; reconnect=true, ownsplatform=false) = SlaveContainer(RealTimePlatform(), host, port; reconnect, ownsplatform)
+SlaveContainer(host, port, name; reconnect=true, ownsplatform=false) = SlaveContainer(RealTimePlatform(), host, port, name; reconnect, ownsplatform)
 
-function SlaveContainer(p::Platform, host, port, name=string(uuid4()); reconnect=true)
+function SlaveContainer(p::Platform, host, port, name=string(uuid4()); reconnect=true, ownsplatform=false)
   c = SlaveContainer(Ref(name), p, Dict{String,Agent}(), Dict{AgentID,Set{Agent}}(),
-    Dict{String,Set{AgentID}}(), Ref(false), Ref(false), Ref(TCPSocket()), Dict{String,Channel}(), host, port, Ref(reconnect))
+    Dict{String,Set{AgentID}}(), Ref(false), Ref(false), Ref(TCPSocket()), Dict{String,Channel}(), host, port, Ref(reconnect), ownsplatform)
   add(p, c)
   c
 end
@@ -481,6 +482,9 @@ function shutdown(c::SlaveContainer)
   end
   close(c.sock[])
   @debug "Stopped SlaveContainer"
+  if c.ownsplatform
+    shutdown(platform(c))
+  end
   nothing
 end
 
