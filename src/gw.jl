@@ -114,6 +114,8 @@ end
 
 # task monitoring incoming JSON messages from master container
 function _run(gw)
+  nagle(gw.sock[], false)
+  quickack(gw.sock[], true)
   while true
     try
       _println(gw.sock[], "{\"alive\": true}")
