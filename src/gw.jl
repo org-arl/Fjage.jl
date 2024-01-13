@@ -11,15 +11,13 @@ struct Gateway
   sock::Ref{TCPSocket}
   subscriptions::Set{String}
   pending::Dict{String,Channel}
-
   msgqueue::Vector
   tasks_waiting_for_msg::Vector{Tuple{Task,#=receive_id::=#Int}}
   msgqueue_lock::ReentrantLock # Protects both msgqueue and tasks_waiting_for_msg
-
   host::String
   port::Int
   reconnect::Ref{Bool}
-  function Gateway(name::String, host::String, port::Int; reconnect=true)
+  function Gateway(name::String, host, port::Int; reconnect=true)
     gw = new(
       AgentID(name, false),
       Ref(connect(host, port)),
@@ -28,14 +26,14 @@ struct Gateway
       Vector(),
       Vector{Tuple{Task,Int}}(),
       ReentrantLock(),
-      host, port, Ref(reconnect)
+      string(host), port, Ref(reconnect)
     )
     @async _run(gw)
     gw
   end
 end
 
-Gateway(host::String, port::Int; reconnect=true) = Gateway("julia-gw-" * string(uuid1()), host, port; reconnect=reconnect)
+Gateway(host, port::Int; reconnect=true) = Gateway("julia-gw-" * string(uuid1()), host, port; reconnect=reconnect)
 
 Base.show(io::IO, gw::Gateway) = print(io, gw.agentID.name)
 
