@@ -6,4 +6,9 @@ module Services
 end
 
 "Shell command execution request message."
-const ShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq")
+@msg "org.arl.fjage.shell.ShellExecReq" struct ShellExecReq
+  cmd::Union{String,Nothing} = nothing
+  script::Union{String,Nothing} = nothing
+  args::Vector{String} = String[]
+  ans::Bool = false
+end
