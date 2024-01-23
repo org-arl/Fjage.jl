@@ -5,103 +5,148 @@ const _messageclasses = Dict{String,DataType}()
 
 "An action represented by a message."
 module Performative
-  const REQUEST = "REQUEST"
-  const AGREE = "AGREE"
-  const REFUSE = "REFUSE"
-  const FAILURE = "FAILURE"
-  const INFORM = "INFORM"
-  const CONFIRM = "CONFIRM"
-  const DISCONFIRM = "DISCONFIRM"
-  const QUERY_IF = "QUERY_IF"
-  const NOT_UNDERSTOOD = "NOT_UNDERSTOOD"
-  const CFP = "CFP"
-  const PROPOSE = "PROPOSE"
-  const CANCEL = "CANCEL"
+  const REQUEST = :REQUEST
+  const AGREE = :AGREE
+  const REFUSE = :REFUSE
+  const FAILURE = :FAILURE
+  const INFORM = :INFORM
+  const CONFIRM = :CONFIRM
+  const DISCONFIRM = :DISCONFIRM
+  const QUERY_IF = :QUERY_IF
+  const NOT_UNDERSTOOD = :NOT_UNDERSTOOD
+  const CFP = :CFP
+  const PROPOSE = :PROPOSE
+  const CANCEL = :CANCEL
 end
 
 "Base class for messages transmitted by one agent to another."
-abstract type Message <: AbstractDict{Symbol,Any} end
+abstract type Message end
 
-"""
-    mtype = MessageClass(context, clazz[, superclass[, performative]])
+function clazz end
 
-Create a message class from a fully qualified class name. If a performative is not
-specified, it is guessed based on the class name. For class names ending with "Req",
-the performative is assumed to be REQUEST, and for all other messages, INFORM.
-
-# Examples
-
-```julia-repl
-julia> MyShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq");
-julia> req = MyShellExecReq(cmd="ps")
-ShellExecReq: REQUEST [cmd:"ps"]
-```
-"""
-function MessageClass(context, clazz::String, superclass=nothing, performative=nothing)
-  sname = replace(string(clazz), "." => "_")
-  tname = sname
-  if performative === nothing
-    performative = match(r"Req$",string(clazz))==nothing ? Performative.INFORM : Performative.REQUEST
-  end
-  if superclass === nothing
-    superclass = "$(@__MODULE__).Message"
+function _msg(clazz, perf, sdef)
+  if @capture(sdef, struct T_ <: P_ fields__ end)
+    push!(fields, :(msgID::String = string(Fjage.uuid4())))
+    push!(fields, :(perf::Symbol = $perf))
+    push!(fields, :(sender::Union{AgentID,Nothing} = nothing))
+    push!(fields, :(recipient::Union{AgentID,Nothing} = nothing))
+    push!(fields, :(inReplyTo::Union{String,Nothing} = nothing))
+    push!(fields, :(sentAt::Int64 = 0))
+    quote
+      Base.@kwdef mutable struct $(T) <: $(P); $(fields...); end
+      Fjage.clazz(::Type{$(T)}) = $(clazz)
+      Fjage.clazz(::$(T)) = $(clazz)
+      Fjage._messageclasses[$(clazz)] = $(T)
+    end |> esc
+  elseif @capture(sdef, struct T_ fields__ end)
+    push!(fields, :(msgID::String = string(Fjage.uuid4())))
+    push!(fields, :(perf::Symbol = $perf))
+    push!(fields, :(sender::Union{AgentID,Nothing} = nothing))
+    push!(fields, :(recipient::Union{AgentID,Nothing} = nothing))
+    push!(fields, :(inReplyTo::Union{String,Nothing} = nothing))
+    push!(fields, :(sentAt::Int64 = 0))
+    quote
+      Base.@kwdef mutable struct $(T) <: Fjage.Message; $(fields...); end
+      Fjage.clazz(::Type{$(T)}) = $(clazz)
+      Fjage.clazz(::$(T)) = $(clazz)
+      Fjage._messageclasses[$(clazz)] = $(T)
+    end |> esc
   else
-    scname = string(superclass)
-    ndx = findlast(isequal('.'), scname)
-    if ndx !== nothing
-      scname = scname[ndx+1:end]
-    end
-    if scname == tname
-      tname = "$(scname)_"
-    end
+    @error "Bad message definition"
   end
-  expr = Expr(:toplevel)
-  expr.args = [Meta.parse("""
-      struct $(tname) <: $(superclass)
-        clazz::String
-        data::Dict{String,Any}
-        $(tname)(c::String, d::Dict{String,Any}) = new(c, d)
-      end
-    """),
-    Meta.parse("""
-      function $(sname)(d::Dict{String, Any})
-        get!(d, "msgID", string($(@__MODULE__).uuid4()))
-        get!(d, "perf", "$performative")
-        return $(tname)("$(clazz)", d)
-      end
-    """),
-    Meta.parse("""
-      function $(sname)(; kwargs...)
-        dict = Dict{String,Any}(
-          "msgID" => string($(@__MODULE__).uuid4()),
-          "perf" => "$(performative)"
-        )
-        for k in keys(kwargs)
-          dict[string(k)] = kwargs[k]
-        end
-        return $(tname)("$(clazz)", dict)
-      end
-    """),
-    Meta.parse("""
-      $(@__MODULE__)._messageclasses["$(clazz)"] = $(tname)
-    """)]
-  if sname != tname
-    push!(expr.args, Meta.parse("$(tname)(; kwargs...) = $(sname)(; kwargs...)"))
-  end
-  return context.eval(expr)
 end
 
-function AbstractMessageClass(context, clazz::String, performative=nothing)
-  sname = replace(string(clazz), "." => "_")
-  expr = Expr(:toplevel)
-  expr.args = [Meta.parse("abstract type $sname <: $(@__MODULE__).Message end"), Meta.parse("$sname")]
-  rv = context.eval(expr)
-  MessageClass(context, clazz, rv, performative)
-  return rv
+macro msg(clazz, perf, sdef)
+  perf = QuoteNode(eval(perf))
+  _msg(clazz, perf, sdef)
 end
+
+macro msg(clazz, sdef)
+  perf = endswith(clazz, "Req") ? :(:REQUEST) : :(:INFORM)
+  _msg(clazz, perf, sdef)
+end
+
+
+# """
+#     mtype = MessageClass(context, clazz[, superclass[, performative]])
+
+# Create a message class from a fully qualified class name. If a performative is not
+# specified, it is guessed based on the class name. For class names ending with "Req",
+# the performative is assumed to be REQUEST, and for all other messages, INFORM.
+
+# # Examples
+
+# ```julia-repl
+# julia> MyShellExecReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.ShellExecReq");
+# julia> req = MyShellExecReq(cmd="ps")
+# ShellExecReq: REQUEST [cmd:"ps"]
+# ```
+# """
+# function MessageClass(context, clazz::String, superclass=nothing, performative=nothing)
+#   sname = replace(string(clazz), "." => "_")
+#   tname = sname
+#   if performative === nothing
+#     performative = match(r"Req$",string(clazz))==nothing ? Performative.INFORM : Performative.REQUEST
+#   end
+#   if superclass === nothing
+#     superclass = "$(@__MODULE__).Message"
+#   else
+#     scname = string(superclass)
+#     ndx = findlast(isequal('.'), scname)
+#     if ndx !== nothing
+#       scname = scname[ndx+1:end]
+#     end
+#     if scname == tname
+#       tname = "$(scname)_"
+#     end
+#   end
+#   expr = Expr(:toplevel)
+#   expr.args = [Meta.parse("""
+#       struct $(tname) <: $(superclass)
+#         clazz::String
+#         data::Dict{String,Any}
+#         $(tname)(c::String, d::Dict{String,Any}) = new(c, d)
+#       end
+#     """),
+#     Meta.parse("""
+#       function $(sname)(d::Dict{String, Any})
+#         get!(d, "msgID", string($(@__MODULE__).uuid4()))
+#         get!(d, "perf", "$performative")
+#         return $(tname)("$(clazz)", d)
+#       end
+#     """),
+#     Meta.parse("""
+#       function $(sname)(; kwargs...)
+#         dict = Dict{String,Any}(
+#           "msgID" => string($(@__MODULE__).uuid4()),
+#           "perf" => "$(performative)"
+#         )
+#         for k in keys(kwargs)
+#           dict[string(k)] = kwargs[k]
+#         end
+#         return $(tname)("$(clazz)", dict)
+#       end
+#     """),
+#     Meta.parse("""
+#       $(@__MODULE__)._messageclasses["$(clazz)"] = $(tname)
+#     """)]
+#   if sname != tname
+#     push!(expr.args, Meta.parse("$(tname)(; kwargs...) = $(sname)(; kwargs...)"))
+#   end
+#   return context.eval(expr)
+# end
+
+# function AbstractMessageClass(context, clazz::String, performative=nothing)
+#   sname = replace(string(clazz), "." => "_")
+#   expr = Expr(:toplevel)
+#   expr.args = [Meta.parse("abstract type $sname <: $(@__MODULE__).Message end"), Meta.parse("$sname")]
+#   rv = context.eval(expr)
+#   MessageClass(context, clazz, rv, performative)
+#   return rv
+# end
 
 function clone(original::Message)
-  cloned = _messageclass_lookup(original.__clazz__)(original.__clazz__, deepcopy(original.__data__))
+  cloned = deepcopy(original)
   cloned.msgID = string(uuid4())
   return cloned
 end
@@ -111,17 +156,17 @@ end
     registermessages(messageclasses)
 
 Register message classes with Fjage. Usually message classes are automatically registered on
-creation with `MessageClass()`. However, when developing packages, if `MessageClass()` is used
-at the module level, the types may be precompiled and the code to register the classes may not
-get executed at runtime. In such cases, you may need to explicitly call `registermessages()`
-in the `__init()__` funciton for the module.
+creation with `@msg`. However, when developing packages, if `@msg` is used at the module level,
+the types may be precompiled and the code to register the classes may not get executed at runtime.
+In such cases, you may need to explicitly call `registermessages()` in the `__init()__` function
+for the module.
 """
-function registermessages(msg=subtypes(Fjage.Message))
-  for t ∈ msg
-    endswith(string(t), '_') && continue
-    s = t().__clazz__
-    Fjage._messageclasses[s] = t
-    registermessages(subtypes(t))
+function registermessages(msg=subtypes(Message))
+  for T ∈ msg
+    endswith(string(T), '_') && continue
+    s = clazz(T)
+    _messageclasses[s] = T
+    registermessages(subtypes(T))
   end
 end
 
@@ -145,24 +190,23 @@ end
 
 # adds notation message.field
 function Base.getproperty(s::Message, p::Symbol)
-  if p == :__clazz__
-    return getfield(s, :clazz)
-  elseif p == :__data__
-    return getfield(s, :data)
-  else
-    p1 = string(p)
-    if p1 == "performative"
-      p1 = "perf"
-    elseif p1 == "messageID"
-      p1 = "msgID"
-    end
-    v = getfield(s, :data)
-    if !haskey(v, p1)
-      return nothing
-    end
-    v = v[p1]
-    return v
+  if p == :performative
+    p = :perf
+  elseif p == :messageID
+    p = :msgID
   end
+  hasfield(typeof(s), p) || return nothing
+  getfield(s, p)
+end
+
+function Base.setproperty!(s::Message, p::Symbol, v)
+  if p == :performative
+    p = :perf
+  elseif p == :messageID
+    p = :msgID
+  end
+  hasfield(typeof(s), p) || throw(ArgumentError("$(typeof(s)) has no property called $p"))
+  setfield!(s, p, v)
 end
 
 # immutable dictionary interface for Messages
@@ -174,97 +218,105 @@ function Base.get(s::Message, p::Symbol, default)
 end
 
 Base.getindex(s::Message, p::Symbol) = getproperty(s, p)
-Base.keys(s::Message) = Symbol.(keys(getfield(s, :data)))
-Base.values(s::Message) = values(getfield(s, :data))
+Base.keys(s::Message) = fieldnames(typeof(s))
+Base.values(s::Message) = getfield.(Ref(s), fieldnames(typeof(s)))
 Base.eltype(s::Message) = Pair{Symbol,Any}
-Base.length(s::Message) = length(getfield(s, :data))
+Base.length(s::Message) = fieldcount(typeof(s))
 
 function Base.iterate(s::Message)
-  it = iterate(getfield(s, :data))
-  it === nothing && return nothing
-  (Symbol(it[1][1]) => it[1][2], it[2])
+  f = fieldnames(typeof(s))
+  isempty(f) && return nothing
+  v = getfield.(Ref(s), f)
+  (f[1] => v[1], (f[2:end], v[2:end]))
 end
 
 function Base.iterate(s::Message, state)
-  it = iterate(getfield(s, :data), state)
-  it === nothing && return nothing
-  (Symbol(it[1][1]) => it[1][2], it[2])
+  isempty(state[1]) && return nothing
+  (state[1][1] => state[2][1], (state[1][2:end], state[2][2:end]))
 end
 
-# adds notation message.field
-function Base.setproperty!(s::Message, p::Symbol, v)
-  (p == :__clazz__ || p == :__data__) && throw(ArgumentError("read-only property cannot be set"))
-  p1 = string(p)
-  if p1 == "performative"
-    p1 = "perf"
-  elseif p1 == "messageID"
-    p1 = "msgID"
-  end
-  getfield(s, :data)[p1] = v
-  nothing
-end
-
-# pretty prints arrays without type names
-function _repr(x)
-  x = repr(x)
-  m = match(r"[A-Za-z0-9]+(\[.+\])", x)
-  m !== nothing && (x = m[1])
-  x
-end
+# # pretty prints arrays without type names
+# function _repr(x)
+#   x = repr(x)
+#   m = match(r"[A-Za-z0-9]+(\[.+\])", x)
+#   m !== nothing && (x = m[1])
+#   x
+# end
 
 # pretty printing of messages
-function Base.show(io::IO, msg::Message)
-  ndx = findlast(".", msg.__clazz__)
-  s = ndx === nothing ? msg.__clazz__ : msg.__clazz__[ndx[1]+1:end]
-  p = ""
-  data_suffix = ""
-  signal_suffix = ""
-  suffix = ""
-  data = msg.__data__
-  for k in keys(data)
-    x = data[k]
-    if k == "perf"
-      s *= ": " * x
-    elseif k == "data"
-      if typeof(x) <: Array
-        data_suffix *= "($(length(x)) bytes)"
-      else
-        p *= " $k:" * _repr(data[k])
-      end
-    elseif k == "signal"
-      if typeof(x) <: Array
-        signal_suffix *= "($(length(x)) samples)"
-      else
-        p *= " $k:" * _repr(data[k])
-      end
-    elseif k != "sender" && k != "recipient" && k != "msgID" && k != "inReplyTo" && k != "sentAt"
-      if typeof(x) <: Number || typeof(x) == String || typeof(x) <: Array || typeof(x) == Bool
-        p *= " $k:" * _repr(x)
-      else
-        suffix = "..."
-      end
-    end
-  end
-  length(suffix) > 0 && (p *= " " * suffix)
-  length(signal_suffix) > 0 && (p *= " " * signal_suffix)
-  length(data_suffix) > 0 && (p *= " " * data_suffix)
-  p = strip(p)
-  length(p) > 0 && (s *= " [$p]")
-  if msg.__clazz__ == "org.arl.fjage.GenericMessage"
-    m = match(r"^GenericMessage: (.*)$", s)
-    m === nothing || (s = m[1])
-  end
-  print(io, s)
-end
+# function Base.show(io::IO, msg::Message)
+#   ndx = findlast(".", msg.__clazz__)
+#   s = ndx === nothing ? msg.__clazz__ : msg.__clazz__[ndx[1]+1:end]
+#   p = ""
+#   data_suffix = ""
+#   signal_suffix = ""
+#   suffix = ""
+#   data = msg.__data__
+#   for k in keys(data)
+#     x = data[k]
+#     if k == "perf"
+#       s *= ": " * x
+#     elseif k == "data"
+#       if typeof(x) <: Array
+#         data_suffix *= "($(length(x)) bytes)"
+#       else
+#         p *= " $k:" * _repr(data[k])
+#       end
+#     elseif k == "signal"
+#       if typeof(x) <: Array
+#         signal_suffix *= "($(length(x)) samples)"
+#       else
+#         p *= " $k:" * _repr(data[k])
+#       end
+#     elseif k != "sender" && k != "recipient" && k != "msgID" && k != "inReplyTo" && k != "sentAt"
+#       if typeof(x) <: Number || typeof(x) == String || typeof(x) <: Array || typeof(x) == Bool
+#         p *= " $k:" * _repr(x)
+#       else
+#         suffix = "..."
+#       end
+#     end
+#   end
+#   length(suffix) > 0 && (p *= " " * suffix)
+#   length(signal_suffix) > 0 && (p *= " " * signal_suffix)
+#   length(data_suffix) > 0 && (p *= " " * data_suffix)
+#   p = strip(p)
+#   length(p) > 0 && (s *= " [$p]")
+#   if msg.__clazz__ == "org.arl.fjage.GenericMessage"
+#     m = match(r"^GenericMessage: (.*)$", s)
+#     m === nothing || (s = m[1])
+#   end
+#   print(io, s)
+# end
+
+# concrete message without data
+@msg "org.arl.fjage.Message" struct _Message end
 
 "Generic message type that can carry arbitrary name-value pairs as data."
-GenericMessage = MessageClass(@__MODULE__, "org.arl.fjage.GenericMessage")
+abstract type GenericMessage <: Message end
+
+# concrete generic message
+@msg "org.arl.fjage.GenericMessage" struct _GenericMessage <: GenericMessage
+  data::Dict{String,Any} = Dict{String,Any}()
+end
+
+GenericMessage(perf::Symbol=Performative.INFORM; kwargs...) = _GenericMessage(perf=perf, kwargs...)
+GenericMessage(inreplyto::Message, perf::Symbol=Performative.INFORM; kwargs...) = _GenericMessage(perf=perf, inReplyTo=inreplyto.msgID, recipient=inreplyto.sender, kwargs...)
 
 "Parameter request message."
-ParameterReq = MessageClass(@__MODULE__, "org.arl.fjage.param.ParameterReq")
+@msg "org.arl.fjage.param.ParameterReq" struct ParameterReq
+  index::Int = -1
+  param::Union{String,Nothing} = nothing
+  value::Union{Any,Nothing} = nothing
+  requests::Union{Dict{String,Any},Nothing} = nothing
+end
 
 "Parameter response message."
-ParameterRsp = MessageClass(@__MODULE__, "org.arl.fjage.param.ParameterRsp")
+@msg "org.arl.fjage.param.ParameterRsp" struct ParameterRsp
+  index::Int = -1
+  param::Union{String,Nothing} = nothing
+  value::Union{Any,Nothing} = nothing
+  values::Union{Dict{String,Any},Nothing} = nothing
+end
 
 """
     msg = Message([perf])
@@ -274,162 +326,159 @@ Create a message with just a performative (`perf`) and no data. If the performat
 is not specified, it defaults to INFORM. If the inreplyto is specified, the message
 `inReplyTo` and `recipient` fields are set accordingly.
 """
-Message(perf::String=Performative.INFORM) = _Message(perf=perf)
-Message(inreplyto::Message, perf::String=Performative.INFORM) = _Message(perf=perf, inReplyTo=inreplyto.msgID, recipient=inreplyto.sender)
+Message(perf::Symbol=Performative.INFORM) = _Message(perf=perf)
+Message(inreplyto::Message, perf::Symbol=Performative.INFORM) = _Message(perf=perf, inReplyTo=inreplyto.msgID, recipient=inreplyto.sender)
 
-# message base class
-_Message = MessageClass(@__MODULE__, "org.arl.fjage.Message")
+# # convenience methods and pretty printing for parameters
 
-# convenience methods and pretty printing for parameters
+# function org_arl_fjage_param_ParameterReq(vals...; index=-1)
+#   req = ParameterReq(index=index)
+#   qlist = Pair{String,Any}[]
+#   for v ∈ vals
+#     if v isa String
+#       push!(qlist, Pair{String,Any}(v, nothing))
+#     elseif v isa Symbol
+#       push!(qlist, Pair{String,Any}(string(v), nothing))
+#     elseif v isa Pair
+#       push!(qlist, Pair{String,Any}(string(v[1]), v[2]))
+#     end
+#   end
+#   if length(qlist) > 0
+#     q = popfirst!(qlist)
+#     req.param = q[1]
+#     req.value = q[2]
+#     if length(qlist) > 0
+#       req.requests = Dict{String,Any}[]
+#       for q ∈ qlist
+#         push!(req.requests, Dict{String,Any}("param" => q[1], "value" => q[2]))
+#       end
+#     end
+#   end
+#   req
+# end
 
-function org_arl_fjage_param_ParameterReq(vals...; index=-1)
-  req = ParameterReq(index=index)
-  qlist = Pair{String,Any}[]
-  for v ∈ vals
-    if v isa String
-      push!(qlist, Pair{String,Any}(v, nothing))
-    elseif v isa Symbol
-      push!(qlist, Pair{String,Any}(string(v), nothing))
-    elseif v isa Pair
-      push!(qlist, Pair{String,Any}(string(v[1]), v[2]))
-    end
-  end
-  if length(qlist) > 0
-    q = popfirst!(qlist)
-    req.param = q[1]
-    req.value = q[2]
-    if length(qlist) > 0
-      req.requests = Dict{String,Any}[]
-      for q ∈ qlist
-        push!(req.requests, Dict{String,Any}("param" => q[1], "value" => q[2]))
-      end
-    end
-  end
-  req
-end
+# """
+#     get!(p::ParameterReq, param)
 
-"""
-    get!(p::ParameterReq, param)
+# Request parameter `param` to be fetched.
 
-Request parameter `param` to be fetched.
+# # Examples
 
-# Examples
+# ```julia-repl
+# julia> p = ParameterReq(index=1)
+# ParameterReq[index=1]
+# julia> get!(p, "modulation")
+# ParameterReq[index=1 modulation=?]
+# julia> get!(p, "fec")
+# ParameterReq[index=1 modulation=? ...]
+# ```
+# """
+# function Base.get!(p::ParameterReq, param)
+#   if p.param === nothing
+#     p.param = param
+#   else
+#     p.requests === nothing && (p.requests = Dict{String,Any}[])
+#     push!(p.requests, Dict{String,Any}("param" => param))
+#   end
+#   p
+# end
 
-```julia-repl
-julia> p = ParameterReq(index=1)
-ParameterReq[index=1]
-julia> get!(p, "modulation")
-ParameterReq[index=1 modulation=?]
-julia> get!(p, "fec")
-ParameterReq[index=1 modulation=? ...]
-```
-"""
-function Base.get!(p::ParameterReq, param)
-  if p.param === nothing
-    p.param = param
-  else
-    p.requests === nothing && (p.requests = Dict{String,Any}[])
-    push!(p.requests, Dict{String,Any}("param" => param))
-  end
-  p
-end
+# """
+#     set!(p::ParameterReq, param, value)
 
-"""
-    set!(p::ParameterReq, param, value)
+# Request parameter `param` to be set to `value`.
 
-Request parameter `param` to be set to `value`.
+# # Examples
 
-# Examples
+# ```julia-repl
+# julia> p = ParameterReq(index=1)
+# ParameterReq[index=1]
+# julia> set!(p, "modulation", "ofdm")
+# ParameterReq[index=1 modulation=ofdm]
+# julia> set!(p, "fec", 1)
+# ParameterReq[index=1 modulation=ofdm ...]
+# ```
+# """
+# function set!(p::ParameterReq, param, value)
+#   if p.param === nothing
+#     p.param = param
+#     p.value = value
+#   else
+#     p.requests === nothing && (p.requests = Dict{String,Any}[])
+#     push!(p.requests, Dict{String,Any}("param" => param, "value" => value))
+#   end
+#   p
+# end
 
-```julia-repl
-julia> p = ParameterReq(index=1)
-ParameterReq[index=1]
-julia> set!(p, "modulation", "ofdm")
-ParameterReq[index=1 modulation=ofdm]
-julia> set!(p, "fec", 1)
-ParameterReq[index=1 modulation=ofdm ...]
-```
-"""
-function set!(p::ParameterReq, param, value)
-  if p.param === nothing
-    p.param = param
-    p.value = value
-  else
-    p.requests === nothing && (p.requests = Dict{String,Any}[])
-    push!(p.requests, Dict{String,Any}("param" => param, "value" => value))
-  end
-  p
-end
+# """
+#     get(p::ParameterRsp, param)
 
-"""
-    get(p::ParameterRsp, param)
+# Extract parameter `param` from a parameter response message.
+# """
+# function Base.get(p::ParameterRsp, key)
+#   skey = string(key)
+#   dskey = "." * skey
+#   (!isnothing(p.param) && (p.param == skey || endswith(p.param, dskey))) && return p.value
+#   vals = p.values
+#   if vals !== nothing
+#     for (k, v) ∈ vals
+#       (k == skey || endswith(k, dskey)) && return v
+#     end
+#   end
+#   nothing
+# end
 
-Extract parameter `param` from a parameter response message.
-"""
-function Base.get(p::ParameterRsp, key)
-  skey = string(key)
-  dskey = "." * skey
-  (!isnothing(p.param) && (p.param == skey || endswith(p.param, dskey))) && return p.value
-  vals = p.values
-  if vals !== nothing
-    for (k, v) ∈ vals
-      (k == skey || endswith(k, dskey)) && return v
-    end
-  end
-  nothing
-end
+# function Base.show(io::IO, p::ParameterReq)
+#   print(io, "ParameterReq[")
+#   p.index !== nothing && p.index ≥ 0 && print(io, "index=", p.index, ' ')
+#   p.param !== nothing && print(io, p.param, '=', (p.value === nothing ? "?" : string(p.value)))
+#   p.requests === nothing || print(io, " ...")
+#   print(io, ']')
+# end
 
-function Base.show(io::IO, p::ParameterReq)
-  print(io, "ParameterReq[")
-  p.index !== nothing && p.index ≥ 0 && print(io, "index=", p.index, ' ')
-  p.param !== nothing && print(io, p.param, '=', (p.value === nothing ? "?" : string(p.value)))
-  p.requests === nothing || print(io, " ...")
-  print(io, ']')
-end
+# function Base.show(io::IO, p::ParameterRsp)
+#   print(io, "ParameterRsp[")
+#   p.index !== nothing && p.index ≥ 0 && print(io, "index=", p.index, ' ')
+#   p.param !== nothing && print(io, p.param, '=', p.value)
+#   p.values === nothing || print(io, " ...")
+#   print(io, ']')
+# end
 
-function Base.show(io::IO, p::ParameterRsp)
-  print(io, "ParameterRsp[")
-  p.index !== nothing && p.index ≥ 0 && print(io, "index=", p.index, ' ')
-  p.param !== nothing && print(io, p.param, '=', p.value)
-  p.values === nothing || print(io, " ...")
-  print(io, ']')
-end
-
-function Base.println(io::IO, p::ParameterRsp)
-  plist = Pair{String,Any}[]
-  if p.param !== nothing
-    x = p.param
-    occursin(".", x) || (x = "." * x)
-    push!(plist, x => p.value)
-    vs = p.values
-    if vs !== nothing
-      for v ∈ vs
-        x = v[1]
-        occursin(".", x) || (x = "." * x)
-        push!(plist, x => v[2])
-      end
-    end
-  end
-  sort!(plist; by=(x -> x[1]))
-  let n = findfirst(x -> x[1] == ".title", plist)
-    n === nothing || println(io, "« ", plist[n][2], " »\n")
-  end
-  let n = findfirst(x -> x[1] == ".description", plist)
-    n === nothing || plist[n][2] == "" || println(io, plist[n][2], "\n")
-  end
-  prefix = ""
-  ro = p.readonly === nothing ? String[] : p.readonly
-  for (k, v) ∈ plist
-    k === ".type" && continue
-    k === ".title" && continue
-    k === ".description" && continue
-    ks = split(k, '.')
-    cprefix = join(ks[1:end-1], '.')
-    if cprefix != prefix
-      prefix != "" && println(io)
-      prefix = cprefix
-      println(io, '[', cprefix, ']')
-    end
-    println(io, "  ", ks[end], k ∈ ro ? " ⤇ " : " = ", v)
-  end
-end
+# function Base.println(io::IO, p::ParameterRsp)
+#   plist = Pair{String,Any}[]
+#   if p.param !== nothing
+#     x = p.param
+#     occursin(".", x) || (x = "." * x)
+#     push!(plist, x => p.value)
+#     vs = p.values
+#     if vs !== nothing
+#       for v ∈ vs
+#         x = v[1]
+#         occursin(".", x) || (x = "." * x)
+#         push!(plist, x => v[2])
+#       end
+#     end
+#   end
+#   sort!(plist; by=(x -> x[1]))
+#   let n = findfirst(x -> x[1] == ".title", plist)
+#     n === nothing || println(io, "« ", plist[n][2], " »\n")
+#   end
+#   let n = findfirst(x -> x[1] == ".description", plist)
+#     n === nothing || plist[n][2] == "" || println(io, plist[n][2], "\n")
+#   end
+#   prefix = ""
+#   ro = p.readonly === nothing ? String[] : p.readonly
+#   for (k, v) ∈ plist
+#     k === ".type" && continue
+#     k === ".title" && continue
+#     k === ".description" && continue
+#     ks = split(k, '.')
+#     cprefix = join(ks[1:end-1], '.')
+#     if cprefix != prefix
+#       prefix != "" && println(io)
+#       prefix = cprefix
+#       println(io, '[', cprefix, ']')
+#     end
+#     println(io, "  ", ks[end], k ∈ ro ? " ⤇ " : " = ", v)
+#   end
+# end
