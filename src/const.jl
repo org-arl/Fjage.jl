@@ -6,7 +6,7 @@ module Services
 end
 
 "Shell command execution request message."
-@msg "org.arl.fjage.shell.ShellExecReq" struct ShellExecReq
+@message "org.arl.fjage.shell.ShellExecReq" struct ShellExecReq
   cmd::Union{String,Nothing} = nothing
   script::Union{String,Nothing} = nothing
   args::Vector{String} = String[]
