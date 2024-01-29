@@ -34,4 +34,8 @@ include("container.jl")
 include("fsm.jl")
 include("coroutine_behavior.jl")
 
+function __init__()
+  registermessages()
+end
+
 end
