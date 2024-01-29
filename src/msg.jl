@@ -115,7 +115,7 @@ for the module.
 """
 function registermessages(msg=subtypes(Message))
   for T ∈ msg
-    endswith(string(T), '_') && continue
+    T <: GenericMessage && continue
     s = classname(T)
     _messageclasses[s] = T
     registermessages(subtypes(T))
@@ -124,7 +124,7 @@ end
 
 function _messageclass_lookup(classname::String)
   haskey(_messageclasses, classname) && return _messageclasses[classname]
-  Message
+  GenericMessage{Symbol(classname)}
 end
 
 # helper function to see if a message matches a filter
@@ -148,8 +148,9 @@ function Base.getproperty(s::Message, p::Symbol)
 end
 
 function Base.setproperty!(s::Message, p::Symbol, v)
-  hasfield(typeof(s), p) || throw(ArgumentError("$(typeof(s)) has no property called $p"))
-  setfield!(s, p, v)
+  hasfield(typeof(s), p) || return s
+  ftype = fieldtype(typeof(s), p)
+  setfield!(s, p, convert(ftype, v))
 end
 
 # immutable dictionary interface for Messages
@@ -233,15 +234,21 @@ end
 @message "org.arl.fjage.Message" struct _Message end
 
 "Generic message type that can carry arbitrary name-value pairs as data."
-abstract type GenericMessage <: Message end
-
-# concrete generic message
-@message "org.arl.fjage.GenericMessage" struct _GenericMessage <: GenericMessage
+Base.@kwdef mutable struct GenericMessage{T} <: Message
   __data__::Dict{Symbol,Any} = Dict{Symbol,Any}()
+  messageID::String = string(Fjage.uuid4())
+  performative::Symbol = Performative.INFORM
+  sender::Union{AgentID,Nothing} = nothing
+  recipient::Union{AgentID,Nothing} = nothing
+  inReplyTo::Union{String,Nothing} = nothing
+  sentAt::Int64 = 0
 end
 
-GenericMessage(perf::Symbol=Performative.INFORM; kwargs...) = _GenericMessage(performative=perf, kwargs...)
-GenericMessage(inreplyto::Message, perf::Symbol=Performative.INFORM; kwargs...) = _GenericMessage(performative=perf, inReplyTo=inreplyto.messageID, recipient=inreplyto.sender, kwargs...)
+Fjage.classname(::Type{GenericMessage{T}}) where T = string(T)
+Fjage.classname(::GenericMessage{T}) where T = string(T)
+
+GenericMessage(args...) = GenericMessage{Symbol("org.arl.fjage.GenericMessage")}(args...)
+GenericMessage(clazz::String, perf::Symbol=Performative.INFORM; kwargs...) = GenericMessage{Symbol(clazz)}(; performative=perf, kwargs...)
 
 # adds notation message.field
 
@@ -316,7 +323,7 @@ end
   index::Int = -1
   param::Union{String,Nothing} = nothing
   value::Union{Any,Nothing} = nothing
-  values::Union{Vector{Dict{String,Any}},Nothing} = nothing
+  values::Union{Dict{String,Any},Nothing} = nothing
 end
 
 # convenience methods and pretty printing for parameters
