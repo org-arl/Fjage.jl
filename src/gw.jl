@@ -223,14 +223,20 @@ function Base.close(gw::Gateway)
 end
 
 # prepares a message to be sent to the server
-function _prepare!(msg::Message)
-  for k in keys(msg.__data__)
-    v = msg.__data__[k]
+function _prepare(msg::Message)
+  data = Dict{Symbol,Any}()
+  for k ∈ keys(msg)
+    v = msg[k]
     if typeof(v) <: Array && typeof(v).parameters[1] <: Complex
       btype = typeof(v).parameters[1].parameters[1]
-      msg.__data__[k] = reinterpret(btype, v)
+      data[k] = reinterpret(btype, v)
+    elseif v !== nothing
+      k === :performative && (k = :perf)
+      k === :messageID && (k = :msgID)
+      data[k] = v
     end
   end
+  classname(msg), data
 end
 
 # converts Base64 encoded arrays to Julia arrays
@@ -259,44 +265,43 @@ function _b64toarray(v)
 end
 
 # creates a message object from a JSON representation of the object
-function _inflate(json)
+function _inflate(json::AbstractDict)
   function inflate_recursively!(d)
-    for (k,v) in d
+    for (k, v) ∈ d
       if typeof(v) <: Dict && haskey(v, "clazz") && match(r"^\[.$", v["clazz"]) != nothing
         v = _b64toarray(v)
       end
       if typeof(v) <: Array && length(v) > 0
         t = typeof(v[1])
         v = Array{t}(v)
-        kcplx = k*"__isComplex"
+        kcplx = k * "__isComplex"
         if haskey(d, kcplx) && d[kcplx]
           v = Array{Complex{t}}(reinterpret(Complex{t}, v))
           delete!(d, kcplx)
         end
       end
-      if typeof(v) <: Dict
-        v = inflate_recursively!(v)
-      end
-      d[k] = v
+      d[k] = typeof(v) <: AbstractDict ? inflate_recursively!(v) : v
     end
-    return d
-  end
-
-  if typeof(json) == String
-    json = JSON.parse(json)
+    d
   end
   clazz = json["clazz"]
   data = inflate_recursively!(json["data"])
-  stype = _messageclass_lookup(clazz)
-  obj = @eval $stype()
-  for (k,v) in data
+  obj = _messageclass_lookup(clazz)()
+  for (k, v) ∈ data
     if k == "sender" || k == "recipient"
       v = AgentID(v)
+    elseif k == "perf"
+      k = "performative"
+      v = Symbol(v)
+    elseif k == "msgID"
+      k = "messageID"
     end
-    obj.__data__[k] = v
+    setproperty!(obj, Symbol(k), v)
   end
   obj
 end
+
+_inflate(json::String) = _inflate(JSON.parse(json))
 
 """
     send(gw, msg)
@@ -308,13 +313,13 @@ function send(gw::Gateway, msg)
   isopen(gw.sock[]) || return false
   msg.sender = gw.agentID
   msg.sentAt = Dates.value(now())
-  _prepare!(msg)
+  clazz, data = _prepare(msg)
   json = JSON.json(Dict(
-    "action" => "send",
-    "relay" => true,
-    "message" => Dict(
-      "clazz" => msg.__clazz__,
-      "data" => msg.__data__
+    :action => :send,
+    :relay => true,
+    :message => Dict(
+      :clazz => clazz,
+      :data => data
     )
   ))
   _println(gw.sock[], json)
