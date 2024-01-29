@@ -85,7 +85,7 @@ _alive(gw::Gateway) = nothing
 
 function _deliver(gw::Gateway, msg::Message, relay::Bool)
   lock(gw.msgqueue_lock) do
-    for (idx, (task, _)) in pairs(gw.tasks_waiting_for_msg)
+    for (idx, (task, _)) ∈ pairs(gw.tasks_waiting_for_msg)
       # Check if message matches the filter. This has to happen on the receiver
       # task because this task may run in a different world age.
       schedule(task, (current_task(), msg))
@@ -193,7 +193,7 @@ end
 function agentsforservice(gw::Gateway, svc::String)
   rq = Dict("action" => "agentsForService", "service" => svc)
   rsp = _ask(gw, rq)
-  [AgentID(a, false, gw) for a in rsp["agentIDs"]]
+  [AgentID(a, false, gw) for a ∈ rsp["agentIDs"]]
 end
 
 "Subscribe to receive all messages sent to the given topic."
@@ -338,10 +338,11 @@ it must take in a message and return `true` or `false`. A message for which it r
 receive(gw::Gateway, timeout::Int=0) = receive(gw, msg->true, timeout)
 
 const receive_counter = Threads.Atomic{Int}(0)
+
 function receive(gw::Gateway, filt, timeout=0)
   receive_id = (receive_counter[] += 1)
   maybe_msg = lock(gw.msgqueue_lock) do
-    for (idx, msg) in pairs(gw.msgqueue)
+    for (idx, msg) ∈ pairs(gw.msgqueue)
       if _matches(filt, msg)
         return Some(popat!(gw.msgqueue, idx))
       end
@@ -353,7 +354,7 @@ function receive(gw::Gateway, filt, timeout=0)
       @async begin
         sleep(timeout/1e3)
         lock(gw.msgqueue_lock) do
-          for (idx, (_, id)) in pairs(gw.tasks_waiting_for_msg)
+          for (idx, (_, id)) ∈ pairs(gw.tasks_waiting_for_msg)
             # We must identify the receive to remove from the waiting list
             # based on the receive ID and not the task because the task which
             # started this one may have had its previous receive satisfied and
@@ -370,14 +371,10 @@ function receive(gw::Gateway, filt, timeout=0)
     push!(gw.tasks_waiting_for_msg, (current_task(), receive_id))
     return nothing
   end
-  if !isnothing(maybe_msg)
-    return something(maybe_msg)
-  end
+  isnothing(maybe_msg) || return something(maybe_msg)
   while true
     maybe_task_and_msg = wait()
-    if isnothing(maybe_task_and_msg)
-      return nothing
-    end
+    isnothing(maybe_task_and_msg) && return nothing
     delivery_task, msg = maybe_task_and_msg
     if _matches(filt, msg)
       schedule(delivery_task, true)
