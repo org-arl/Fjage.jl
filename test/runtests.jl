@@ -18,6 +18,7 @@ try
   @testset "Fjage" begin
 
     gw = Gateway("localhost", 5081)
+
     @testset "Gateway" begin
       @test typeof(gw) <: Gateway
       @test typeof(gw.agentID) <: AgentID
@@ -25,6 +26,7 @@ try
     end
 
     shell = agentforservice(gw, "org.arl.fjage.shell.Services.SHELL")
+
     @testset "agentforservice (+)" begin
       @test typeof(shell) <: AgentID
       @test shell.name == "shell"
@@ -51,9 +53,11 @@ try
       @test length(alist) == 0
     end
 
-    MyAbstractReq = AbstractMessageClass(@__MODULE__, "org.arl.fjage.test.MyAbstractReq")
-    MyReq = MessageClass(@__MODULE__, "org.arl.fjage.test.MyReq", MyAbstractReq)
-    @testset "MessageClass" begin
+    abstract type MyAbstractReq <: Message end
+    @message "org.arl.fjage.test.MyAbstractReq" struct MyAbstractReq <: MyAbstractReq end
+    @message "org.arl.fjage.test.MyReq" struct MyReq <: MyAbstractReq end
+
+    @testset "@message" begin
       @test MyAbstractReq <: Message
       @test MyReq <: Message
       @test MyReq <: MyAbstractReq
@@ -69,9 +73,8 @@ try
       send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
       rsp = take!(channel)
       @test typeof(rsp) <: Message
-      @test rsp.performative == "AGREE"
-
-      # Make sure response is removed
+      @test rsp.performative == Performative.AGREE
+      # make sure response is removed
       rsp = receive(gw)
       @test isnothing(rsp)
     end
@@ -88,9 +91,8 @@ try
         sleep(0.1)
       end
       @test typeof(rsp) <: Message
-      @test rsp.performative == "AGREE"
-
-      # Make sure response is removed
+      @test rsp.performative == Performative.AGREE
+      # make sure response is removed
       rsp = receive(gw)
       @test isnothing(rsp)
     end
@@ -100,31 +102,32 @@ try
       send(shell, ShellExecReq(cmd="1+2"))
       rsp = receive(gw, 1000)
       @test typeof(rsp) <: Message
-      @test rsp.performative == "AGREE"
+      @test rsp.performative == Performative.AGREE
     end
 
     @testset "request (gw)" begin
       flush(gw)
       rsp = request(gw, ShellExecReq(recipient=shell, cmd="1+2"))
       @test typeof(rsp) <: Message
-      @test rsp.performative == "AGREE"
+      @test rsp.performative == Performative.AGREE
     end
 
     @testset "request (aid)" begin
       flush(gw)
       rsp = request(shell, ShellExecReq(cmd="1+2"))
       @test typeof(rsp) <: Message
-      @test rsp.performative == "AGREE"
+      @test rsp.performative == Performative.AGREE
     end
 
     @testset "<< (aid, +)" begin
       flush(gw)
       rsp = shell << ShellExecReq(cmd="1+2")
       @test typeof(rsp) <: Message
-      @test rsp.performative == "AGREE"
+      @test rsp.performative == Performative.AGREE
     end
 
     dummy = agent(gw, "dummy")
+
     @testset "agent" begin
       @test typeof(dummy) <: AgentID
     end
@@ -144,6 +147,7 @@ try
     end
 
     ntf = topic(gw, "broadcast")
+
     @testset "topic" begin
       @test typeof(ntf) <: AgentID
     end
@@ -158,7 +162,7 @@ try
     @testset "subscribe (+)" begin
       flush(gw)
       subscribe(gw, ntf)
-      send(ntf, ShellExecReq(cmd="1+2"))
+      send(ntf, ShellExecReq(cmd="1+2+3"))
       msg = receive(gw, 1000)
       @test typeof(msg) <: ShellExecReq
     end
@@ -171,8 +175,7 @@ try
       send(ntf, ShellExecReq(cmd="1+2"))
       msg = take!(channel)
       @test typeof(msg) <: ShellExecReq
-
-      # Make sure response is removed
+      # make sure response is removed
       msg = receive(gw, ShellExecReq)
       @test isnothing(msg)
     end
@@ -195,7 +198,8 @@ try
       @test isnothing(msg)
     end
 
-    UnknownReq = MessageClass(@__MODULE__, "org.arl.fjage.shell.UnknownReq")
+    @message "org.arl.fjage.shell.UnknownReq" struct UnknownReq end
+
     @testset "receive (filt, -)" begin
       flush(gw)
       send(ntf, ShellExecReq(cmd="1+2"))
@@ -271,10 +275,10 @@ try
         sleep(1.0)
       end
       @test typeof(rsp) <: Message
-      @test rsp.performative == "AGREE"
+      @test rsp.performative == Performative.AGREE
     end
 
-    # Issue 21
+    # issue #21
     @testset "inflate json" begin
       vec_f64 = [1.0, 2.0, 3.4]
       vec_c64 = [1.0 + 2.0im, 3.4 + 2.1im]
@@ -309,24 +313,22 @@ try
   end
 
 finally
-
-# stop fjåge
-
+  # stop fjåge
   println("Stopping fjåge...")
   kill(master)
-
 end
 
 @testset "CoroutineBehavior" begin
+
   c = Container()
   start(c)
 
-  @agent struct MyAgent; end
+  @agent struct MyAgent end
   a = MyAgent()
   add(c, a)
 
   @testset "delay" begin
-    # Test that delay indeed delays for at least as long as promised
+    # test that delay indeed delays for at least as long as promised
     dt = 100
     t = zeros(Int, 10)
     cond = Threads.Condition()
@@ -335,10 +337,10 @@ end
         t[i] = currenttimemillis(a)
         delay(b, dt)
       end
-      lock(()->notify(cond), cond)
+      lock(() -> notify(cond), cond)
     end
     add(a, b)
-    lock(()->wait(cond), cond)
+    lock(() -> wait(cond), cond)
 
     @test done(b)
     @test all(diff(t) .>= dt)
@@ -346,7 +348,7 @@ end
   end
 
   @testset "stop" begin
-    # Test that CoroutineBehaviors can be stopped during delays
+    # test that CoroutineBehaviors can be stopped during delays
     flag = false
     b = CoroutineBehavior() do a, b
       delay(b, 1000)
@@ -361,7 +363,7 @@ end
   end
 
   @testset "lock" begin
-    # Test that CoroutineBehaviors lock the agent while they are running
+    # test that CoroutineBehaviors lock the agent while they are running
     dt = 1000
     t0 = currenttimemillis(a)
     t1 = -1
@@ -370,16 +372,19 @@ end
     sleep(0.5 + dt*1e-3)
     @test t1 - t0 > dt
   end
+
 end
 
 @testset "clone(::Message)" begin
+
   original = GenericMessage()
   original.data = [1,2,3]
   cloned = clone(original)
 
-  @test cloned.__clazz__ == original.__clazz__
+  @test classname(cloned) == classname(original)
   @test typeof(cloned) == typeof(original)
-  @test cloned.msgID != original.msgID
+  @test cloned.messageID != original.messageID
   @test cloned.data == original.data
   @test cloned.data !== original.data
+
 end
