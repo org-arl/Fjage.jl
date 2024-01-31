@@ -143,14 +143,18 @@ end
 # adds notation message.field
 
 function Base.getproperty(s::Message, p::Symbol)
-  hasfield(typeof(s), p) || return nothing
+  hasfield(typeof(s), p) || error("message $(typeof(s)) has no field $(p)")
   getfield(s, p)
 end
 
-function Base.setproperty!(s::Message, p::Symbol, v)
-  hasfield(typeof(s), p) || return s
-  ftype = fieldtype(typeof(s), p)
-  setfield!(s, p, convert(ftype, v))
+function Base.setproperty!(s::Message, p::Symbol, v; ignore_missingfields=false)
+  if hasfield(typeof(s), p)
+    ftype = fieldtype(typeof(s), p)
+    setfield!(s, p, convert(ftype, v))
+  else
+    ignore_missingfields || error("message $(typeof(s)) has no field $(p)")
+    s
+  end
 end
 
 # immutable dictionary interface for Messages
@@ -255,10 +259,13 @@ GenericMessage(clazz::String, perf::Symbol=Performative.INFORM; kwargs...) = Gen
 function Base.getproperty(s::GenericMessage, p::Symbol)
   hasfield(typeof(s), p) && return getfield(s, p)
   haskey(s.__data__, p) && return s.__data__[p]
-  nothing
+  clazz = classname(s)
+  ndx = findlast(".", clazz)
+  ndx === nothing || (clazz = clazz[ndx[1]+1:end])
+  error("message $(clazz) has no field $(p)")
 end
 
-function Base.setproperty!(s::GenericMessage, p::Symbol, v)
+function Base.setproperty!(s::GenericMessage, p::Symbol, v; ignore_missingfields=false)
   if hasfield(typeof(s), p)
     setfield!(s, p, v)
   else

@@ -296,7 +296,7 @@ function _inflate(json::AbstractDict)
     elseif k == "msgID"
       k = "messageID"
     end
-    setproperty!(obj, Symbol(k), v)
+    setproperty!(obj, Symbol(k), v; ignore_missingfields=true)
   end
   obj
 end
