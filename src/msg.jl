@@ -140,21 +140,11 @@ function _matches(filt, msg)
   false
 end
 
-# adds notation message.field
-
-function Base.getproperty(s::Message, p::Symbol)
-  hasfield(typeof(s), p) || error("message $(typeof(s)) has no field $(p)")
-  getfield(s, p)
-end
-
-function Base.setproperty!(s::Message, p::Symbol, v; ignore_missingfields=false)
-  if hasfield(typeof(s), p)
-    ftype = fieldtype(typeof(s), p)
-    setfield!(s, p, convert(ftype, v))
-  else
-    ignore_missingfields || error("message $(typeof(s)) has no field $(p)")
-    s
-  end
+# like Base.setproperty!, but does not throw an error if the property does not exist
+function trysetproperty!(s::Message, p::Symbol, v)
+  hasfield(typeof(s), p) || return s
+  ftype = fieldtype(typeof(s), p)
+  setfield!(s, p, convert(ftype, v))
 end
 
 # immutable dictionary interface for Messages
@@ -265,13 +255,15 @@ function Base.getproperty(s::GenericMessage, p::Symbol)
   error("message $(clazz) has no field $(p)")
 end
 
-function Base.setproperty!(s::GenericMessage, p::Symbol, v; ignore_missingfields=false)
+function Base.setproperty!(s::GenericMessage, p::Symbol, v)
   if hasfield(typeof(s), p)
     setfield!(s, p, v)
   else
     s.__data__[p] = v
   end
 end
+
+trysetproperty!(s::GenericMessage, p::Symbol, v) = setproperty!(s, p, v)
 
 # dictionary interface for GenericMessages
 
