@@ -198,17 +198,19 @@ function Base.show(io::IO, msg::Message)
     elseif k == :data
       if typeof(x) <: Array
         data_suffix *= "($(length(x)) bytes)"
-      else
+      elseif msg[k] !== nothing
         p *= " $k:" * _repr(msg[k])
       end
     elseif k == :signal
       if typeof(x) <: Array
         signal_suffix *= "($(length(x)) samples)"
-      else
+      elseif msg[k] !== nothing
         p *= " $k:" * _repr(msg[k])
       end
     elseif k != :sender && k != :recipient && k != :messageID && k != :inReplyTo && k != :sentAt
-      if typeof(x) <: Number || typeof(x) == String || typeof(x) <: Array || typeof(x) == Bool
+      if typeof(x) <: Number
+        isnan(x) || (p *= " $k:" * _repr(x))
+      elseif typeof(x) == String || typeof(x) <: Array || typeof(x) == Bool
         p *= " $k:" * _repr(x)
       elseif x !== nothing && x !== missing
         suffix = "..."
