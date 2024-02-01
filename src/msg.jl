@@ -88,7 +88,6 @@ MyShellExecReq:REQUEST[cmd:"ps"]
 ```
 """
 macro message(classname, perf, sdef)
-  perf = QuoteNode(eval(perf))
   _message(classname, perf, sdef)
 end
 
