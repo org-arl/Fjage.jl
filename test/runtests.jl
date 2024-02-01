@@ -55,7 +55,7 @@ try
 
     abstract type MyAbstractReq <: Message end
     @message "org.arl.fjage.test.MyAbstractReq" struct MyAbstractReq <: MyAbstractReq end
-    @message "org.arl.fjage.test.MyReq" struct MyReq <: MyAbstractReq end
+    @message "org.arl.fjage.test.MyReq" Performative.AGREE struct MyReq <: MyAbstractReq end
 
     @testset "@message" begin
       @test MyAbstractReq <: Message
@@ -63,6 +63,7 @@ try
       @test MyReq <: MyAbstractReq
       @test isa(MyAbstractReq(), MyAbstractReq)
       @test isa(MyReq(), MyAbstractReq)
+      @test MyReq().performative == Performative.AGREE
     end
 
     @testset "send & receive (gw, blocking)" begin
