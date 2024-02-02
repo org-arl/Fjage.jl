@@ -29,6 +29,8 @@ Return the fully qualified class name of a message.
 """
 function classname end
 
+include("kwdef.jl")
+
 function _message(classname, perf, sdef)
   if @capture(sdef, struct T_ <: P_ fields__ end)
     if T == P
@@ -37,32 +39,38 @@ function _message(classname, perf, sdef)
     else
       extra = :()
     end
-    push!(fields, :(messageID::String = string(Fjage.uuid4())))
+    T = esc(T)
+    P = esc(P)
+    fields .= esc.(fields)
+    extra = esc(extra)
+    push!(fields, :(messageID::String = string(uuid4())))
     push!(fields, :(performative::Symbol = $perf))
-    push!(fields, :(sender::Union{Fjage.AgentID,Nothing} = nothing))
-    push!(fields, :(recipient::Union{Fjage.AgentID,Nothing} = nothing))
+    push!(fields, :(sender::Union{AgentID,Nothing} = nothing))
+    push!(fields, :(recipient::Union{AgentID,Nothing} = nothing))
     push!(fields, :(inReplyTo::Union{String,Nothing} = nothing))
     push!(fields, :(sentAt::Int64 = 0))
     quote
-      Base.@kwdef mutable struct $(T) <: $(P); $(fields...); end
+      @kwdef mutable struct $(T) <: $(P); $(fields...); end
       Fjage.classname(::Type{$(T)}) = $(classname)
       Fjage.classname(::$(T)) = $(classname)
       Fjage._messageclasses[$(classname)] = $(T)
       $extra
-    end |> esc
+    end
   elseif @capture(sdef, struct T_ fields__ end)
-    push!(fields, :(messageID::String = string(Fjage.uuid4())))
+    T = esc(T)
+    fields .= esc.(fields)
+    push!(fields, :(messageID::String = string(uuid4())))
     push!(fields, :(performative::Symbol = $perf))
-    push!(fields, :(sender::Union{Fjage.AgentID,Nothing} = nothing))
-    push!(fields, :(recipient::Union{Fjage.AgentID,Nothing} = nothing))
+    push!(fields, :(sender::Union{AgentID,Nothing} = nothing))
+    push!(fields, :(recipient::Union{AgentID,Nothing} = nothing))
     push!(fields, :(inReplyTo::Union{String,Nothing} = nothing))
     push!(fields, :(sentAt::Int64 = 0))
     quote
-      Base.@kwdef mutable struct $(T) <: Fjage.Message; $(fields...); end
+      @kwdef mutable struct $(T) <: Message; $(fields...); end
       Fjage.classname(::Type{$(T)}) = $(classname)
       Fjage.classname(::$(T)) = $(classname)
       Fjage._messageclasses[$(classname)] = $(T)
-    end |> esc
+    end
   else
     @error "Bad message definition"
   end
