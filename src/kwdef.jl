@@ -1,4 +1,4 @@
-using Base: isexpr
+isexpr(@nospecialize(ex), head::Symbol) = isa(ex, Expr) && ex.head === head
 
 macro kwdef(expr)
     expr = macroexpand(__module__, expr) # to expand @static
