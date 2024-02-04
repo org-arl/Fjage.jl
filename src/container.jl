@@ -673,13 +673,13 @@ function _deliver(c::SlaveContainer, msg::Message, relay::Bool)
   if msg.recipient.name ∈ keys(c.agents)
     _deliver(c.agents[msg.recipient.name], msg)
   elseif relay
-    _prepare!(msg)
+    clazz, data = _prepare(msg)
     json = JSON.json(Dict(
-      "action" => "send",
-      "relay" => true,
-      "message" => Dict(
-        "clazz" => msg.__clazz__,
-        "data" => msg.__data__
+      :action => :send,
+      :relay => true,
+      :message => Dict(
+        :clazz => clazz,
+        :data => data
       )
     ))
     try
@@ -2059,7 +2059,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
       reconnect(container(a), ex) || reporterror(a, ex)
     end
   end
-  rmsg = ParameterRsp(perf=Performative.INFORM, inReplyTo=msg.messageID, recipient=msg.sender, readonly=ro, index=ndx)
+  rmsg = ParameterRsp(performative=Performative.INFORM, inReplyTo=msg.messageID, recipient=msg.sender, readonly=ro, index=ndx)
   length(rsp) > 0 && ((rmsg.param, rmsg.value) = popfirst!(rsp))
   length(rsp) > 0 && (rmsg.values = Dict(rsp))
   send(a, rmsg)
