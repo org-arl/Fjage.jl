@@ -20,7 +20,7 @@ module Performative
 end
 
 "Base class for messages transmitted by one agent to another."
-abstract type Message end
+abstract type Message <: AbstractDict{Symbol,Any} end
 
 """
     classname(msg::Message)
@@ -34,15 +34,18 @@ include("kwdef.jl")
 function _message(classname, perf, sdef)
   if @capture(sdef, struct T_ <: P_ fields__ end)
     if T == P
+      extra2 = :( Fjage.classname(::Type{$(T)}) = $(classname) )
       T = Symbol("_" * string(T))
-      extra = :( $(P)(; kwargs...) = $(T)(; kwargs...) )
+      extra1 = :( $(P)(; kwargs...) = $(T)(; kwargs...) )
     else
-      extra = :()
+      extra1 = :()
+      extra2 = :()
     end
     T = esc(T)
     P = esc(P)
     fields .= esc.(fields)
-    extra = esc(extra)
+    extra1 = esc(extra1)
+    extra2 = esc(extra2)
     push!(fields, :(messageID::String = string(uuid4())))
     push!(fields, :(performative::Symbol = $perf))
     push!(fields, :(sender::Union{AgentID,Nothing} = nothing))
@@ -54,7 +57,8 @@ function _message(classname, perf, sdef)
       Fjage.classname(::Type{$(T)}) = $(classname)
       Fjage.classname(::$(T)) = $(classname)
       Fjage._messageclasses[$(classname)] = $(T)
-      $extra
+      $extra1
+      $extra2
     end
   elseif @capture(sdef, struct T_ fields__ end)
     T = esc(T)
@@ -123,9 +127,14 @@ for the module.
 function registermessages(msg=subtypes(Message))
   for T ∈ msg
     T <: GenericMessage && continue
-    s = classname(T)
-    _messageclasses[s] = T
-    registermessages(subtypes(T))
+    try
+      s = classname(T)
+      _messageclasses[s] = T
+      registermessages(subtypes(T))
+    catch
+      # types with no classname defined are abstract
+      # and do not need to be registered
+    end
   end
 end
 
@@ -151,7 +160,16 @@ end
 function trysetproperty!(s::Message, p::Symbol, v)
   hasfield(typeof(s), p) || return s
   ftype = fieldtype(typeof(s), p)
-  setfield!(s, p, convert(ftype, v))
+  ftype === Symbol && (v = Symbol(v))
+  if v === nothing
+    ftype === Float32 && (v = NaN32)
+    ftype === Float64 && (v = NaN64)
+  end
+  try
+    setfield!(s, p, convert(ftype, v))
+  catch ex
+    @warn "Error setting field $p to $v: $ex"
+  end
 end
 
 # immutable dictionary interface for Messages
@@ -332,6 +350,7 @@ end
   param::Union{String,Nothing} = nothing
   value::Union{Any,Nothing} = nothing
   values::Union{Dict{String,Any},Nothing} = nothing
+  readonly::Vector{String} = String[]
 end
 
 # convenience methods and pretty printing for parameters
