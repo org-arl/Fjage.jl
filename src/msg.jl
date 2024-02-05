@@ -35,7 +35,7 @@ function _message(classname, perf, sdef)
   if @capture(sdef, struct T_ <: P_ fields__ end)
     if T == P
       extra2 = :( Fjage.classname(::Type{$(T)}) = $(classname) )
-      T = Symbol("_" * string(T))
+      T = Symbol("_Concrete" * string(T))
       extra1 = :( $(P)(; kwargs...) = $(T)(; kwargs...) )
     else
       extra1 = :()
@@ -127,13 +127,10 @@ for the module.
 function registermessages(msg=subtypes(Message))
   for T ∈ msg
     T <: GenericMessage && continue
-    try
+    if applicable(classname, T)
       s = classname(T)
       _messageclasses[s] = T
       registermessages(subtypes(T))
-    catch
-      # types with no classname defined are abstract
-      # and do not need to be registered
     end
   end
 end
