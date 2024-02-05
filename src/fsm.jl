@@ -214,7 +214,7 @@ function action(b::FSMBehavior)
             _mutex_call(onenter, b.agent, b, b.state)
           end
         catch ex
-          reconnect(container(b.agent), ex) || reporterror(b.agent, ex)
+          reconnect(container(b.agent), ex) || logerror(ex, b.agent)
         end
         yield()
       else
@@ -222,7 +222,7 @@ function action(b::FSMBehavior)
       end
     end
   catch ex
-    reconnect(container(b.agent), ex) || reporterror(b.agent, ex)
+    reconnect(container(b.agent), ex) || logerror(ex, b.agent)
   end
   delete!(b.agent._behaviors, b)
   b.agent = nothing

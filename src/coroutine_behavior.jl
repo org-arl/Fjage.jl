@@ -52,15 +52,13 @@ end
 function action(b::CoroutineBehavior)
     b.control_task = current_task()
     b.action_task = Task() do
-        try
+        logerror(b.agent) do
             b.action(b.agent, b)
-        catch e
-            reporterror(b.agent, e)
         end
         b.done = true
         yieldto(b.control_task)
     end
-    try
+    logerror(b.agent) do
         while !b.done
             if !isnothing(b.block)
                 lock(() -> wait(b.block), b.block)
@@ -69,8 +67,6 @@ function action(b::CoroutineBehavior)
                 yieldto(b.action_task)
             end
         end
-    catch ex
-        reporterror(b.agent, ex)
     end
     b.done = true
     b.control_task = nothing
