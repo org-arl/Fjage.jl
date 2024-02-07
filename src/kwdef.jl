@@ -1,3 +1,6 @@
+# Temporary patch for @kwdef.
+# Submitted to Base Julia in https://github.com/JuliaLang/julia/pull/53230
+
 isexpr(@nospecialize(ex), head::Symbol) = isa(ex, Expr) && ex.head === head
 
 macro kwdef(expr)
