@@ -37,7 +37,6 @@ macro kwdef(expr)
             def2 = Expr(:function, sig2, body2)
             kwdefs = Expr(:block, def1, def2)
         else
-            @show T_no_esc
             error("Invalid usage of @kwdef")
         end
     else
