@@ -1453,7 +1453,7 @@ function action(b::OneShotBehavior)
     b.action === nothing || _mutex_call(b.action, b.agent, b)
     b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
-    reconnect(container(b.agent), ex) || logerror(ex, b.agent)
+    reconnect(container(b.agent), ex) || logerror(b.agent)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1506,7 +1506,7 @@ function action(b::CyclicBehavior)
         try
           b.action === nothing || _mutex_call(b.action, b.agent, b)
         catch ex
-          reconnect(container(b.agent), ex) || logerror(ex, b.agent)
+          reconnect(container(b.agent), ex) || logerror(b.agent)
         end
         yield()
       else
@@ -1515,7 +1515,7 @@ function action(b::CyclicBehavior)
     end
     b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
-    reconnect(container(b.agent), ex) || logerror(ex, b.agent)
+    reconnect(container(b.agent), ex) || logerror(b.agent)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1604,7 +1604,7 @@ function action(b::WakerBehavior)
     end
     b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
-    reconnect(container(b.agent), ex) || logerror(ex, b.agent)
+    reconnect(container(b.agent), ex) || logerror(b.agent)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1676,12 +1676,12 @@ function action(b::TickerBehavior)
       try
         b.done || b.action === nothing || _mutex_call(b.action, b.agent, b)
       catch ex
-        reconnect(container(b.agent), ex) || logerror(ex, b.agent)
+        reconnect(container(b.agent), ex) || logerror(b.agent)
       end
     end
     b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
-    reconnect(container(b.agent), ex) || logerror(ex, b.agent)
+    reconnect(container(b.agent), ex) || logerror(b.agent)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1743,12 +1743,12 @@ function action(b::PoissonBehavior)
       try
         b.done || b.action === nothing || _mutex_call(b.action, b.agent, b)
       catch ex
-        reconnect(container(b.agent), ex) || logerror(ex, b.agent)
+        reconnect(container(b.agent), ex) || logerror(b.agent)
       end
     end
     b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
-    reconnect(container(b.agent), ex) || logerror(ex, b.agent)
+    reconnect(container(b.agent), ex) || logerror(b.agent)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
@@ -1824,12 +1824,12 @@ function action(b::MessageBehavior)
         msg = take!(ch)
         msg === nothing || b.action === nothing ||  _mutex_call(b.action, b.agent, b, msg)
       catch ex
-        reconnect(container(b.agent), ex) || logerror(ex, b.agent)
+        reconnect(container(b.agent), ex) || logerror(b.agent)
       end
     end
     b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
-    reconnect(container(b.agent), ex) || logerror(ex, b.agent)
+    reconnect(container(b.agent), ex) || logerror(b.agent)
   finally
     _dont_listen(b.agent, ch)
     close(ch)
@@ -2066,7 +2066,7 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
         end
       end
     catch ex
-      reconnect(container(a), ex) || logerror(ex, a)
+      reconnect(container(a), ex) || logerror(a)
     end
   end
   rmsg = ParameterRsp(performative=Performative.INFORM, inReplyTo=msg.messageID, recipient=msg.sender, readonly=ro, index=ndx)
