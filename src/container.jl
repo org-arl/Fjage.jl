@@ -710,21 +710,21 @@ Run function `f()` and log any errors that occur.
 function logerror(f::Function, src=nothing)
   try
     f()
-  catch ex
-    logerror(ex, src)
+  catch
+    logerror(src)
   end
 end
 
 """
-    logerror(err::Exception)
-    logerror(err::Exception, src)
+    logerror()
+    logerror(src)
 
-Log error `err` with a simple stack trace.
+Log current exception with a stack trace.
 """
-function logerror(ex::Exception, src=nothing)
+function logerror(src=nothing)
   io = IOBuffer()
   src === nothing || print(io, "[$src] ")
-  Base.showerror(IOContext(io, :limit => true), ex, Base.catch_backtrace())
+  Base.show_exception_stack(IOContext(io, :limit => true), Base.catch_stack())
   @error String(take!(io))
 end
 
