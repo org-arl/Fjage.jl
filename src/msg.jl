@@ -500,6 +500,7 @@ function Base.println(io::IO, p::ParameterRsp)
   ro = p.readonly === nothing ? String[] : p.readonly
   for (k, v) ∈ plist
     k === ".type" && continue
+    k === ".name" && continue
     k === ".title" && continue
     k === ".description" && continue
     ks = split(k, '.')

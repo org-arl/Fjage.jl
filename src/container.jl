@@ -1912,6 +1912,7 @@ params(a::Agent) = Pair{String,Symbol}[]
 params(a::Agent, ndx) = Pair{String,Symbol}[]
 
 Fjage.get(a::Agent, ::Val{:type}) = string(typeof(a))
+Fjage.get(a::Agent, ::Val{:name}) = string(AgentID(a))
 Fjage.get(a::Agent, ::Val{:title}) = string(AgentID(a))
 Fjage.get(a::Agent, ::Val{:description}) = ""
 
@@ -2077,6 +2078,7 @@ end
 
 function _resolve(plist, p, ndx)
   psym = Symbol(p)
+  psym === :name && return p, psym
   psym === :type && return p, psym
   psym === :title && return p, psym
   psym === :description && return p, psym
