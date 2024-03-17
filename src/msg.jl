@@ -173,6 +173,7 @@ end
 # immutable dictionary interface for Messages
 
 function Base.get(s::Message, p::Symbol, default)
+  hasproperty(s, p) || return default
   v = getproperty(s, p)
   v === nothing && return default
   v
