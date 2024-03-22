@@ -45,6 +45,7 @@ Get the name of the gateway.
 name(gw::Gateway) = gw.agentID.name
 
 function _println(sock, s)
+  sock === nothing && return
   @debug ">> $s"
   try
     println(sock, s)
@@ -79,7 +80,7 @@ _agents_types(gw::Gateway) = [(gw.agentID.name, "Gateway")]
 _subscriptions(gw::Gateway) = gw.subscriptions
 _services(gw::Gateway) = String[]
 _agentsforservice(gw::Gateway, svc) = String[]
-_onclose(gw::Gateway) = close(gw.sock[])
+_onclose(gw::Gateway) = gw.sock[] === nothing || close(gw.sock[])
 _shutdown(gw::Gateway) = close(gw)
 _alive(gw::Gateway) = nothing
 
@@ -218,7 +219,7 @@ end
 function Base.close(gw::Gateway)
   gw.reconnect[] = false
   _println(gw.sock[], "{\"alive\": false}")
-  close(gw.sock[])
+  gw.sock[] === nothing || close(gw.sock[])
   nothing
 end
 
