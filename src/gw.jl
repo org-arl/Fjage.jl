@@ -33,7 +33,7 @@ struct Gateway
   end
 end
 
-Gateway(host, port::Int; reconnect=true) = Gateway("julia-gw-" * string(uuid1()), host, port; reconnect=reconnect)
+Gateway(host, port::Int; reconnect=true) = Gateway("gateway-" * string(uuid1()), host, port; reconnect=reconnect)
 
 Base.show(io::IO, gw::Gateway) = print(io, gw.agentID.name)
 
