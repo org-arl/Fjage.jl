@@ -320,8 +320,18 @@ Base.length(s::GenericMessage) = fieldcount(typeof(s)) - 1 + length(s.__data__)
 
 function Base.iterate(s::GenericMessage)
   f = keys(s)
+  fiter = iterate(f)
+  fiter === nothing && return nothing
   v = values(s)
-  (f[1] => v[1], (f[2:end], v[2:end]))
+  (fiter[1] => first(v), (fiter[2], 2))
+end
+
+function Base.iterate(s::GenericMessage, (fstate, vndx))
+  f = keys(s)
+  fiter = iterate(f, fstate)
+  fiter === nothing && return nothing
+  v = values(s)
+  (fiter[1] => v[vndx], (fiter[2], vndx+1))
 end
 
 """
