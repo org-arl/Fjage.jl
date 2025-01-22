@@ -71,7 +71,7 @@ try
       channel = Channel()
       @async put!(channel, receive(gw, 1000))
       yield()
-      send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
+      send(gw, ShellExecReq(recipient=shell, command="1+2"))
       rsp = take!(channel)
       @test typeof(rsp) <: Message
       @test rsp.performative == Performative.AGREE
@@ -82,7 +82,7 @@ try
 
     @testset "send & receive (gw, nonblocking)" begin
       flush(gw)
-      send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
+      send(gw, ShellExecReq(recipient=shell, command="1+2"))
       rsp = nothing
       for _ = 1:10
         rsp = receive(gw)
@@ -100,7 +100,7 @@ try
 
     @testset "send & receive (aid)" begin
       flush(gw)
-      send(shell, ShellExecReq(cmd="1+2"))
+      send(shell, ShellExecReq(command="1+2"))
       rsp = receive(gw, 1000)
       @test typeof(rsp) <: Message
       @test rsp.performative == Performative.AGREE
@@ -108,21 +108,21 @@ try
 
     @testset "request (gw)" begin
       flush(gw)
-      rsp = request(gw, ShellExecReq(recipient=shell, cmd="1+2"))
+      rsp = request(gw, ShellExecReq(recipient=shell, command="1+2"))
       @test typeof(rsp) <: Message
       @test rsp.performative == Performative.AGREE
     end
 
     @testset "request (aid)" begin
       flush(gw)
-      rsp = request(shell, ShellExecReq(cmd="1+2"))
+      rsp = request(shell, ShellExecReq(command="1+2"))
       @test typeof(rsp) <: Message
       @test rsp.performative == Performative.AGREE
     end
 
     @testset "<< (aid, +)" begin
       flush(gw)
-      rsp = shell << ShellExecReq(cmd="1+2")
+      rsp = shell << ShellExecReq(command="1+2")
       @test typeof(rsp) <: Message
       @test rsp.performative == Performative.AGREE
     end
@@ -134,13 +134,13 @@ try
     end
 
     @testset "<< (aid, -)" begin
-      rsp = dummy << ShellExecReq(cmd="1+2")
+      rsp = dummy << ShellExecReq(command="1+2")
       @test rsp == nothing
     end
 
     @testset "flush" begin
       flush(gw)
-      send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
+      send(gw, ShellExecReq(recipient=shell, command="1+2"))
       sleep(1)
       flush(gw)
       rsp = receive(gw, 1000)
@@ -155,7 +155,7 @@ try
 
     @testset "subscribe (-)" begin
       flush(gw)
-      send(ntf, ShellExecReq(cmd="1+2"))
+      send(ntf, ShellExecReq(command="1+2"))
       msg = receive(gw, 1000)
       @test msg == nothing
     end
@@ -163,7 +163,7 @@ try
     @testset "subscribe (+)" begin
       flush(gw)
       subscribe(gw, ntf)
-      send(ntf, ShellExecReq(cmd="1+2+3"))
+      send(ntf, ShellExecReq(command="1+2+3"))
       msg = receive(gw, 1000)
       @test typeof(msg) <: ShellExecReq
     end
@@ -173,7 +173,7 @@ try
       channel = Channel()
       @async put!(channel, receive(gw, ShellExecReq, 1000))
       yield()
-      send(ntf, ShellExecReq(cmd="1+2"))
+      send(ntf, ShellExecReq(command="1+2"))
       msg = take!(channel)
       @test typeof(msg) <: ShellExecReq
       # make sure response is removed
@@ -183,7 +183,7 @@ try
 
     @testset "receive (filt, +, nonblocking)" begin
       flush(gw)
-      send(ntf, ShellExecReq(cmd="1+2"))
+      send(ntf, ShellExecReq(command="1+2"))
       msg = nothing
       for _ = 1:10
         msg = receive(gw, ShellExecReq)
@@ -203,7 +203,7 @@ try
 
     @testset "receive (filt, -)" begin
       flush(gw)
-      send(ntf, ShellExecReq(cmd="1+2"))
+      send(ntf, ShellExecReq(command="1+2"))
       msg = receive(gw, UnknownReq, 1000)
       @test msg == nothing
     end
@@ -211,7 +211,7 @@ try
     @testset "unsubscribe" begin
       unsubscribe(gw, ntf)
       flush(gw)
-      send(ntf, ShellExecReq(cmd="1+2"))
+      send(ntf, ShellExecReq(command="1+2"))
       msg = receive(gw, 1000)
       @test msg == nothing
     end
@@ -236,7 +236,7 @@ try
           f = x as double[]
         }
       }"
-    shell << ShellExecReq(cmd=code)
+    shell << ShellExecReq(command=code)
     sleep(2)
     a = agent(gw, "a")
 
@@ -266,11 +266,11 @@ try
     @testset "reconnect" begin
       flush(gw)
       close(gw.sock[])
-      send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
+      send(gw, ShellExecReq(recipient=shell, command="1+2"))
       rsp = receive(gw, 1000)
       @test rsp === nothing
       for i ∈ 1:10
-        send(gw, ShellExecReq(recipient=shell, cmd="1+2"))
+        send(gw, ShellExecReq(recipient=shell, command="1+2"))
         rsp = receive(gw, 1000)
         rsp === nothing || break
         sleep(1.0)
