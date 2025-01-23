@@ -7,9 +7,7 @@ message classes with fields with the same name as the keys in the message.
 Message types are defined using the `@message` macro. For example:
 ```julia
 @message "org.arl.fjage.shell.ShellExecReq" struct ShellExecReq
-  cmd::Union{String,Nothing} = nothing
-  script::Union{String,Nothing} = nothing
-  args::Vector{String} = String[]
+  command::Union{String,Nothing} = nothing
   ans::Bool = false
 end
 ```

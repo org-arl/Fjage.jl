@@ -10,11 +10,11 @@ julia> shell = agentforservice(gw, "org.arl.fjage.shell.Services.SHELL")
 shell
 julia> shell.language
 "Groovy"
-julia> request(gw, ShellExecReq(recipient=shell, cmd="ps"))
+julia> request(gw, ShellExecReq(recipient=shell, command="ps"))
 AGREE
-julia> request(shell, ShellExecReq(cmd="ps"))
+julia> request(shell, ShellExecReq(command="ps"))
 AGREE
-julia> shell << ShellExecReq(cmd="ps")
+julia> shell << ShellExecReq(command="ps")
 AGREE
 julia> close(gw)
 ```
