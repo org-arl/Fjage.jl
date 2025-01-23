@@ -93,10 +93,10 @@ the performative is assumed to be REQUEST, and for all other messages, INFORM.
 
 ```julia-repl
 julia> @message "org.arl.fjage.shell.MyShellExecReq" struct MyShellExecReq
-         cmd::String
+         command::String
        end
-julia> req = MyShellExecReq(cmd="ps")
-MyShellExecReq:REQUEST[cmd:"ps"]
+julia> req = MyShellExecReq(command="ps")
+MyShellExecReq:REQUEST[command:"ps"]
 ```
 """
 macro message(classname, perf, sdef)
