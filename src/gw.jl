@@ -228,9 +228,12 @@ function _prepare(msg::Message)
   data = Dict{Symbol,Any}()
   for k ∈ keys(msg)
     v = msg[k]
-    if typeof(v) <: Array && typeof(v).parameters[1] <: Complex
-      btype = typeof(v).parameters[1].parameters[1]
-      data[k] = reinterpret(btype, v)
+    # multidimensional arrays are serialized in Fortran memory order
+    if v isa AbstractArray{<:Complex}
+      data[k] = reinterpret(real(eltype(v)), vec(transpose(v)))
+      data[Symbol(string(k) * "__isComplex")] = true
+    elseif v isa AbstractArray
+      data[k] = vec(transpose(v))
     elseif v !== nothing
       k === :performative && (k = :perf)
       k === :messageID && (k = :msgID)
