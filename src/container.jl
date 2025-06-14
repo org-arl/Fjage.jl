@@ -1382,14 +1382,16 @@ end
 Restart a blocked behavior, previous blocked by `block(b)`.
 """
 function restart(b::Behavior)
-  b.block === nothing && return
+  oblock = b.block
+  oblock === nothing && return
   if b.timer !== nothing
     close(b.timer)
     return nothing
   end
-  oblock = b.block
-  b.block = nothing
-  lock(() -> notify(oblock), oblock)
+  lock(oblock) do
+    b.block = nothing
+    notify(oblock)
+  end
   nothing
 end
 
@@ -1476,7 +1478,8 @@ OneShotBehavior(action) = OneShotBehavior(nothing, nothing, nothing, false, 0, n
 function action(b::OneShotBehavior)
   try
     b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
-    b.block === nothing || lock(() -> wait(b.block), b.block)
+    oblock = b.block
+    oblock === nothing || lock(() -> b.block === nothing || wait(oblock), oblock)
     b.action === nothing || _mutex_call(b.action, b.agent, b)
     b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
@@ -1529,7 +1532,8 @@ function action(b::CyclicBehavior)
   try
     b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     while !b.done
-      if b.block === nothing
+      oblock = b.block
+      if oblock === nothing
         try
           b.action === nothing || _mutex_call(b.action, b.agent, b)
         catch ex
@@ -1537,7 +1541,7 @@ function action(b::CyclicBehavior)
         end
         yield()
       else
-        lock(() -> wait(b.block), b.block)
+        lock(() -> b.block === nothing || wait(oblock), oblock)
       end
     end
     b.onend === nothing || _mutex_call(b.onend, b.agent, b)
@@ -1623,7 +1627,8 @@ function action(b::WakerBehavior)
     b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     while !b.done
       block(b, b.millis)
-      b.block === nothing || lock(() -> wait(b.block), b.block)
+      oblock = b.block
+      oblock === nothing || lock(() -> b.block === nothing || wait(oblock), oblock)
       if !b.done
         b.done = true
         b.action === nothing || _mutex_call(b.action, b.agent, b)
@@ -1698,7 +1703,8 @@ function action(b::TickerBehavior)
     b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     while !b.done
       block(b, b.millis)
-      b.block === nothing || lock(() -> wait(b.block), b.block)
+      oblock = b.block
+      oblock === nothing || lock(() -> b.block === nothing || wait(oblock), oblock)
       b.ticks += 1
       try
         b.done || b.action === nothing || _mutex_call(b.action, b.agent, b)
@@ -1765,7 +1771,8 @@ function action(b::PoissonBehavior)
     b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     while !b.done
       block(b, round(Int64, b.millis * randexp()))
-      b.block === nothing || lock(() -> wait(b.block), b.block)
+      oblock = b.block
+      oblock === nothing || lock(() -> b.block === nothing || wait(oblock), oblock)
       b.ticks += 1
       try
         b.done || b.action === nothing || _mutex_call(b.action, b.agent, b)
