@@ -234,7 +234,7 @@ function _prepare(msg::Message)
       data[Symbol(string(k) * "__isComplex")] = true
     elseif v isa AbstractArray
       data[k] = vec(transpose(v))
-    else
+    elseif v !== nothing
       k === :performative && (k = :perf)
       k === :messageID && (k = :msgID)
       data[k] = v

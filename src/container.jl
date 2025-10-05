@@ -2030,16 +2030,12 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
       if v === nothing   # get
         if ndx < 0
           x, isro = _get(a, p)
-          if x !== missing && x !== nothing
-            push!(rsp, q => x)
-            isro && push!(ro, q)
-          end
+          push!(rsp, q => x)
+          isro && push!(ro, q)
         else
           x, isro = _get(a, p, ndx)
-          if x !== missing && x !== nothing
-            push!(rsp, q => x)
-            isro && push!(ro, q)
-          end
+          push!(rsp, q => x)
+          isro && push!(ro, q)
         end
       else # set
         if ndx < 0
@@ -2048,22 +2044,18 @@ function _paramreq_action(a::Agent, b::MessageBehavior, msg::ParameterReq)
           if x === missing || x === nothing
             x, isro = _get(a, p)
           end
-          if x !== missing && x !== nothing
-            push!(rsp, q => x)
-            isro && push!(ro, q)
-            onparamchange(a, b, q, ndx, x)
-          end
+          push!(rsp, q => x)
+          isro && push!(ro, q)
+          onparamchange(a, b, q, ndx, x)
         else
           isro = false
           x = _set(a, p, ndx, v)
           if x === missing || x === nothing
             x, isro = _get(a, p, ndx)
           end
-          if x !== missing && x !== nothing
-            push!(rsp, q => x)
-            isro && push!(ro, q)
-            onparamchange(a, b, q, ndx, x)
-          end
+          push!(rsp, q => x)
+          isro && push!(ro, q)
+          onparamchange(a, b, q, ndx, x)
         end
       end
     catch ex
