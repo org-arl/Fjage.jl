@@ -204,6 +204,7 @@ function _repr(x)
   m !== nothing && (x = m[1])
   m = match(r"^\w+(\[.*)$", x)
   m !== nothing && (x = m[1])
+  length(x) > 40 && return nothing
   x
 end
 
@@ -220,18 +221,6 @@ function Base.show(io::IO, msg::Message)
     x = msg[k]
     if k == :performative
       s *= ":" * string(x)
-    elseif k == :data
-      if typeof(x) <: Array
-        data_suffix *= "($(length(x)) bytes)"
-      elseif msg[k] !== nothing
-        p *= " $k:" * _repr(msg[k])
-      end
-    elseif k == :signal
-      if typeof(x) <: Array
-        signal_suffix *= "($(length(x)) samples)"
-      elseif msg[k] !== nothing
-        p *= " $k:" * _repr(msg[k])
-      end
     elseif k != :sender && k != :recipient && k != :messageID && k != :inReplyTo && k != :sentAt
       if typeof(x) <: Number
         isnan(x) || (p *= " $k:" * _repr(x))
