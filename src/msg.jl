@@ -130,8 +130,8 @@ function registermessages(msg=subtypes(Message))
     if applicable(classname, T)
       s = classname(T)
       _messageclasses[s] = T
-      registermessages(subtypes(T))
     end
+    registermessages(subtypes(T))
   end
 end
 
