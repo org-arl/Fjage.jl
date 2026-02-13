@@ -300,7 +300,7 @@ removelistener(::Container, listener) = false
 
 Check if an agent is running in the container.
 """
-containsagent(c::Container, aid::AgentID) = aid.name ∈ keys(c.agents)
+containsagent(c::Container, aid::AgentID) = name(aid) ∈ keys(c.agents)
 containsagent(c::Container, name::String) = name ∈ keys(c.agents)
 
 """
@@ -389,7 +389,7 @@ function Base.kill(c::Container, aid::String)
   true
 end
 
-Base.kill(c::Container, aid::AgentID) = kill(c, aid.name)
+Base.kill(c::Container, aid::AgentID) = kill(c, name(aid))
 Base.kill(c::Container, a::Agent) = kill(c, AgentID(a))
 
 """
@@ -585,7 +585,7 @@ by `owner`. Returns `nothing` if no agent providing specified service found.
 """
 function agentforservice(c::StandaloneContainer, svc::String, owner::Agent)
   svc ∈ keys(c.services) || return nothing
-  AgentID(first(c.services[svc]).name, false, owner)
+  AgentID(name(first(c.services[svc])), false, owner)
 end
 
 """
@@ -596,7 +596,7 @@ by `owner`. Returns an empty list if no agent providing specified service found.
 """
 function agentsforservice(c::StandaloneContainer, svc::String, owner::Agent)
   svc ∈ keys(c.services) || return AgentID[]
-  [AgentID(s.name, false, owner) for s ∈ c.services[svc]]
+  [AgentID(name(s), false, owner) for s ∈ c.services[svc]]
 end
 
 function agentforservice(c::SlaveContainer, svc::String, owner::Agent)
@@ -640,8 +640,8 @@ end
 
 function _deliver(c::StandaloneContainer, msg::Message)
   c.running[] || return false
-  if msg.recipient.name ∈ keys(c.agents)
-    _deliver(c.agents[msg.recipient.name], msg)
+  if name(msg.recipient) ∈ keys(c.agents)
+    _deliver(c.agents[name(msg.recipient)], msg)
   elseif msg.recipient ∈ keys(c.topics)
     foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
   else
@@ -660,8 +660,17 @@ end
 
 _agents(c::SlaveContainer) = collect(keys(c.agents))
 _agents_types(c::SlaveContainer) = [(k, string(typeof(v))) for (k, v) ∈ c.agents]
-_subscriptions(c::SlaveContainer) = collect(string.(keys(c.topics)))
 _services(c::SlaveContainer) = collect(keys(c.services))
+
+_islocal(c::Container, t::AgentID) = any(keys(c.agents)) do k
+  a = AgentID(k)
+  t == a || t == topic(a)
+end
+
+function _subscriptions(c::SlaveContainer)
+  ks = filter(k -> !_islocal(c, k), keys(c.topics))
+  collect(string.(ks))
+end
 
 function _agentsforservice(c::Container, svc::String)
   svc ∈ keys(c.services) || return AgentID[]
@@ -670,27 +679,36 @@ end
 
 function _deliver(c::SlaveContainer, msg::Message, relay::Bool)
   c.running[] || return false
-  if msg.recipient.name ∈ keys(c.agents)
-    _deliver(c.agents[msg.recipient.name], msg)
-  elseif relay
+  # message for local agent
+  if !istopic(msg.recipient) && name(msg.recipient) ∈ keys(c.agents)
+    _deliver(c.agents[name(msg.recipient)], msg)
+    return true
+  end
+  # message for local topics
+  if msg.recipient ∈ keys(c.topics) && _islocal(c, msg.recipient)
+    foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
+  end
+  # message to get master container to relay
+  if relay
     clazz, data = _prepare(msg)
-    json = JSON.json(Dict(
-      :action => :send,
-      :relay => true,
-      :message => Dict(
-        :clazz => clazz,
-        :data => data
+    json = JSON.json(JsonObject(
+      "action" => "send",
+      "relay" => true,
+      "message" => JsonObject(
+        "clazz" => clazz,
+        "data" => data
       )
     ))
     try
       println(c.sock[], json)
+      return true
     catch ex
       @debug "Message $(msg) delivery failed: $(ex)"
       return false
     end
-  elseif msg.recipient ∈ keys(c.topics)
-    foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
-  else
+  end
+  # undeliverable
+  if !istopic(msg.recipient)
     @debug "Message $(msg) undeliverable"
     return false
   end
@@ -889,7 +907,7 @@ function Fjage.processrequest(a::MyAgent, req::MySpecialReq)
 end
 ```
 """
-processrequest(a::Agent, req) = nothing
+processrequest(@nospecialize(a::Agent), @nospecialize(req)) = nothing
 
 """
     processmessage(a::Agent, msg)
@@ -913,7 +931,7 @@ function Fjage.processmessage(a::MyAgent, msg::MySpecialNtf)
 end
 ```
 """
-processmessage(a::Agent, msg) = nothing
+processmessage(@nospecialize(a::Agent), @nospecialize(msg)) = nothing
 
 """
     shutdown(a::Agent)
