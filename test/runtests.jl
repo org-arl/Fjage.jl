@@ -1,6 +1,5 @@
 using Test
 using Fjage
-
 using Base64
 
 # start fjåge
@@ -232,7 +231,7 @@ try
         void setZ(int ndx, int v) {
           if (ndx == 1) y = v
         }
-        void setF(List x) {
+        void setF(x) {
           f = x as double[]
         }
       }"
@@ -283,7 +282,7 @@ try
     @testset "inflate json" begin
       vec_f64 = [1.0, 2.0, 3.4]
       vec_c64 = [1.0 + 2.0im, 3.4 + 2.1im]
-      obj = Fjage._inflate("""
+      obj = Fjage._inflate(Fjage.JSON.parse("""
         {
           "clazz": "org.arl.unet.ParamChangeNtf",
           "data": {
@@ -302,7 +301,7 @@ try
             "recipient": "B"
           }
         }
-      """)
+      """))
       @test obj.paramValues["vecF64"] == vec_f64
       @test obj.paramValues["vecC64"] == vec_c64
       @test obj.sender == AgentID("A")
