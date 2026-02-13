@@ -236,6 +236,35 @@ function Base.close(gw::Gateway)
   nothing
 end
 
+# encodes Julia arrays as Base64 representation
+_array(v::AbstractArray{T}) where {T <: Union{Int8,UInt8}} = JsonObject(
+  "clazz" => "[B",
+  "data" => base64encode(reinterpret(UInt8, v))
+)
+_array(v::AbstractArray{T}) where {T <: Union{Int16,UInt16}} = JsonObject(
+  "clazz" => "[S",
+  "data" => base64encode(reinterpret(UInt8, v))
+)
+_array(v::AbstractArray{T}) where {T <: Union{Int32,UInt32}} = JsonObject(
+  "clazz" => "[I",
+  "data" => base64encode(reinterpret(UInt8, v))
+)
+_array(v::AbstractArray{T}) where {T <: Union{Int64,UInt64}} = JsonObject(
+  "clazz" => "[J",
+  "data" => base64encode(reinterpret(UInt8, v))
+)
+_array(v::AbstractArray{Float32}) = JsonObject(
+  "clazz" => "[F",
+  "data" => base64encode(reinterpret(UInt8, v))
+)
+_array(v::AbstractArray{Float64}) = JsonObject(
+  "clazz" => "[D",
+  "data" => base64encode(reinterpret(UInt8, v))
+)
+
+# fallback for other types
+_array(v) = v
+
 # prepares a message to be sent to the server
 function _prepare(msg::Message)
   data = JSON.Object{Symbol,Any}()
@@ -243,10 +272,10 @@ function _prepare(msg::Message)
     v = msg[k]
     # multidimensional arrays are serialized in Fortran memory order
     if v isa AbstractArray{<:Complex}
-      data[k] = reinterpret(real(eltype(v)), vec(transpose(v)))
+      data[k] = _array(reinterpret(real(eltype(v)), vec(transpose(v))))
       data[Symbol(string(k) * "__isComplex")] = true
     elseif v isa AbstractArray
-      data[k] = vec(transpose(v))
+      data[k] = _array(vec(transpose(v)))
     elseif v !== nothing
       k === :performative && (k = :perf)
       k === :messageID && (k = :msgID)
@@ -282,10 +311,10 @@ function _b64toarray(v)
 end
 
 # creates a message object from a JSON representation of the object
-function _inflate(json::JsonObject)
+function _inflate(json)
   function inflate_recursively!(d)
     for (k, v) ∈ d
-      if typeof(v) <: JSON.Object && haskey(v, "clazz") && match(r"^\[.$", v["clazz"]) != nothing
+      if typeof(v) <: JSON.Object && haskey(v, "clazz") && startswith(v["clazz"], "[")
         v = _b64toarray(v)
       end
       if typeof(v) <: Array && length(v) > 0
@@ -317,8 +346,6 @@ function _inflate(json::JsonObject)
   end
   obj
 end
-
-_inflate(json::String) = _inflate(JSON.parse(json))
 
 """
     send(gw, msg)
