@@ -276,7 +276,7 @@ function _prepare(msg::Message)
       data[Symbol(string(k) * "__isComplex")] = true
     elseif v isa AbstractArray
       data[k] = _array(vec(transpose(v)))
-    elseif v !== nothing
+    elseif v !== nothing && !(v isa AbstractFloat && isnan(v))
       k === :performative && (k = :perf)
       k === :messageID && (k = :msgID)
       data[k] = v
