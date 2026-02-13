@@ -15,7 +15,5 @@ jobs:
         java-version: 1.8
     - uses: actions/checkout@v1.0.0
     - uses: julia-actions/setup-julia@v1
-      with:
-        version: 1.6
     - name: Test
       run: make test
