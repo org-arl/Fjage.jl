@@ -1,6 +1,8 @@
 export Gateway, agent, topic, agentforservice, agentsforservice
 export subscribe, unsubscribe, send, receive, request
 
+const JsonObject = JSON.Object{String,Any}
+
 """
     gw = Gateway([name,] host, port)
 
@@ -10,9 +12,9 @@ struct Gateway
   agentID::AgentID
   sock::Ref{TCPSocket}
   subscriptions::Set{String}
-  pending::Dict{String,Channel}
-  msgqueue::Vector
-  tasks_waiting_for_msg::Vector{Tuple{Task,#=receive_id::=#Int}}
+  pending::Dict{String,Channel{JsonObject}}
+  msgqueue::Vector{Message}
+  tasks_waiting_for_msg::Vector{Tuple{Task,Int}}
   msgqueue_lock::ReentrantLock # Protects both msgqueue and tasks_waiting_for_msg
   host::String
   port::Int
@@ -22,9 +24,9 @@ struct Gateway
       AgentID(name, false),
       Ref(connect(host, port)),
       Set{String}(),
-      Dict{String,Channel}(),
-      Vector(),
-      Vector{Tuple{Task,Int}}(),
+      Dict{String,Channel{JsonObject}}(),
+      Message[],
+      Tuple{Task,Int}[],
       ReentrantLock(),
       string(host), port, Ref(reconnect)
     )
@@ -55,17 +57,24 @@ function _println(sock, s)
   end
 end
 
+function _merge!(d1, d2)
+  for (k, v) ∈ d2
+    d1[k] = v
+  end
+  d1
+end
+
 # respond to master container
 function _respond(gw, rq, rsp)
-  s = JSON.json(merge(Dict("id" => rq["id"], "inResponseTo" => rq["action"]), rsp))
+  s = JSON.json(_merge!(JsonObject("id" => rq["id"], "inResponseTo" => rq["action"]), rsp))
   _println(gw.sock[], s)
 end
 
 # ask master container a question, and wait for reply
-function _ask(gw, rq::Dict)
+function _ask(gw, rq)
   id = string(uuid4())
-  s = JSON.json(merge(rq, Dict("id" => id)))
-  ch = Channel{Dict}(1)
+  s = JSON.json(_merge!(JsonObject("id" => id), rq))
+  ch = Channel{JsonObject}(1)
   gw.pending[id] = ch
   try
     _println(gw.sock[], s)
@@ -104,7 +113,7 @@ end
 function _update_watch(gw)
   watch = _agents(gw)
   append!(watch, _subscriptions(gw))
-  s = JSON.json(Dict(
+  s = JSON.json(JsonObject(
     "action" => "wantsMessagesFor",
     "agentIDs" => watch
   ))
@@ -124,29 +133,29 @@ function _run(gw)
         json = try
           JSON.parse(s)
         catch
-          JSON.Object{String,Any}()
+          JsonObject()
         end
         if haskey(json, "id") && haskey(gw.pending, json["id"])
           put!(gw.pending[json["id"]], json)
         elseif haskey(json, "action")
           if json["action"] == "agents"
             at = _agents_types(gw)
-            _respond(gw, json, Dict("agentIDs" => first.(at), "agentTypes" => last.(at)))
+            _respond(gw, json, JsonObject("agentIDs" => first.(at), "agentTypes" => last.(at)))
           elseif json["action"] == "agentForService"
             alist = _agentsforservice(gw, json["service"])
             if length(alist) > 0
-              _respond(gw, json, Dict("agentID" => first(alist)))
+              _respond(gw, json, JsonObject("agentID" => first(alist)))
             else
-              _respond(gw, json, Dict())
+              _respond(gw, json, JsonObject())
             end
           elseif json["action"] == "agentsForService"
             alist = _agentsforservice(gw, json["service"])
-            _respond(gw, json, Dict("agentIDs" => alist))
+            _respond(gw, json, JsonObject("agentIDs" => alist))
           elseif json["action"] == "services"
-            _respond(gw, json, Dict("services" => _services(gw)))
+            _respond(gw, json, JsonObject("services" => _services(gw)))
           elseif json["action"] == "containsAgent"
             ans = (json["agentID"] ∈ _agents(gw))
-            _respond(gw, json, Dict("answer" => ans))
+            _respond(gw, json, JsonObject("answer" => ans))
           elseif json["action"] == "send"
             rcpt = json["message"]["data"]["recipient"]
             if rcpt ∈ _agents(gw) || rcpt ∈ _subscriptions(gw)
@@ -167,7 +176,7 @@ function _run(gw)
       end
     catch ex
       if !(ex isa ErrorException && startswith(ex.msg, "Unexpected end of input"))
-        @warn ex stacktrace(catch_backtrace())
+        showerror(stderr, ex, catch_backtrace())
       end
     end
     gw.reconnect[] || break
@@ -189,14 +198,14 @@ agent(gw::Gateway, name::String) = AgentID(name, false, gw)
 
 "Find an agent that provides a named service."
 function agentforservice(gw::Gateway, svc::String)
-  rq = Dict("action" => "agentForService", "service" => svc)
+  rq = JsonObject("action" => "agentForService", "service" => svc)
   rsp = _ask(gw, rq)
   haskey(rsp, "agentID") ? AgentID(rsp["agentID"], false, gw) : nothing
 end
 
 "Find all agents that provides a named service."
 function agentsforservice(gw::Gateway, svc::String)
-  rq = Dict("action" => "agentsForService", "service" => svc)
+  rq = JsonObject("action" => "agentsForService", "service" => svc)
   rsp = _ask(gw, rq)
   [AgentID(a, false, gw) for a ∈ rsp["agentIDs"]]
 end
@@ -229,7 +238,7 @@ end
 
 # prepares a message to be sent to the server
 function _prepare(msg::Message)
-  data = Dict{Symbol,Any}()
+  data = JSON.Object{Symbol,Any}()
   for k ∈ keys(msg)
     v = msg[k]
     # multidimensional arrays are serialized in Fortran memory order
@@ -273,7 +282,7 @@ function _b64toarray(v)
 end
 
 # creates a message object from a JSON representation of the object
-function _inflate(json::AbstractDict)
+function _inflate(json::JsonObject)
   function inflate_recursively!(d)
     for (k, v) ∈ d
       if typeof(v) <: JSON.Object && haskey(v, "clazz") && match(r"^\[.$", v["clazz"]) != nothing
@@ -288,7 +297,7 @@ function _inflate(json::AbstractDict)
           delete!(d, kcplx)
         end
       end
-      d[k] = typeof(v) <: AbstractDict ? inflate_recursively!(v) : v
+      d[k] = typeof(v) <: JSON.Object ? inflate_recursively!(v) : v
     end
     d
   end
@@ -322,12 +331,12 @@ function send(gw::Gateway, msg)
   msg.sender = gw.agentID
   msg.sentAt = Dates.value(now())
   clazz, data = _prepare(msg)
-  json = JSON.json(Dict(
-    :action => :send,
-    :relay => true,
-    :message => Dict(
-      :clazz => clazz,
-      :data => data
+  json = JSON.json(JsonObject(
+    "action" => "send",
+    "relay" => true,
+    "message" => JsonObject(
+      "clazz" => clazz,
+      "data" => data
     )
   ))
   _println(gw.sock[], json)
