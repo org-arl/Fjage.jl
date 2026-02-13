@@ -56,7 +56,7 @@ function _println(sock, s)
 end
 
 # respond to master container
-function _respond(gw, rq::Dict, rsp::Dict)
+function _respond(gw, rq, rsp)
   s = JSON.json(merge(Dict("id" => rq["id"], "inResponseTo" => rq["action"]), rsp))
   _println(gw.sock[], s)
 end
@@ -121,7 +121,11 @@ function _run(gw)
       while isopen(gw.sock[])
         s = readline(gw.sock[])
         @debug "<< $s"
-        json = JSON.parse(s)
+        json = try
+          JSON.parse(s)
+        catch
+          JSON.Object{String,Any}()
+        end
         if haskey(json, "id") && haskey(gw.pending, json["id"])
           put!(gw.pending[json["id"]], json)
         elseif haskey(json, "action")
@@ -272,7 +276,7 @@ end
 function _inflate(json::AbstractDict)
   function inflate_recursively!(d)
     for (k, v) ∈ d
-      if typeof(v) <: Dict && haskey(v, "clazz") && match(r"^\[.$", v["clazz"]) != nothing
+      if typeof(v) <: JSON.Object && haskey(v, "clazz") && match(r"^\[.$", v["clazz"]) != nothing
         v = _b64toarray(v)
       end
       if typeof(v) <: Array && length(v) > 0

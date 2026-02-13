@@ -6,7 +6,7 @@ Notes:
 """
 module Fjage
 
-using Sockets, Distributed, Base64, UUIDs, Dates, Logging, Random
+using Sockets, Base64, UUIDs, Dates, Logging, Random
 using JSON, MacroTools, PkgVersion
 using InteractiveUtils: subtypes
 
