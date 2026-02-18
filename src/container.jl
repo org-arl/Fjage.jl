@@ -158,29 +158,29 @@ end
 
 "Standalone container."
 struct StandaloneContainer{T <: Platform} <: Container
-  name::Ref{String}
+  name::Base.RefValue{String}
   platform::T
   agents::Dict{String,Agent}
   topics::Dict{AgentID,Set{Agent}}
   services::Dict{String,Set{AgentID}}
-  running::Ref{Bool}
-  initing::Ref{Bool}
+  running::Base.RefValue{Bool}
+  initing::Base.RefValue{Bool}
 end
 
 "Slave container."
 struct SlaveContainer{T <: Platform} <: Container
-  name::Ref{String}
+  name::Base.RefValue{String}
   platform::T
   agents::Dict{String,Agent}
   topics::Dict{AgentID,Set{Agent}}
   services::Dict{String,Set{AgentID}}
-  running::Ref{Bool}
-  initing::Ref{Bool}
-  sock::Ref{TCPSocket}
+  running::Base.RefValue{Bool}
+  initing::Base.RefValue{Bool}
+  sock::Base.RefValue{TCPSocket}
   pending::Dict{String,Channel}
   host::String
   port::Int
-  reconnect::Ref{Bool}
+  reconnect::Base.RefValue{Bool}
   ownsplatform::Bool
 end
 
