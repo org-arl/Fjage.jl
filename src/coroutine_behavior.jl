@@ -1,15 +1,14 @@
 export CoroutineBehavior
 
-mutable struct CoroutineBehavior <: Behavior
-    agent::Union{Nothing,Agent}
-    block::Union{Nothing,Threads.Condition}
-    timer::Union{Nothing,Timer}
-    done::Bool
-    priority::Int
-
-    action::Any
-    control_task::Union{Nothing, Task}
-    action_task::Union{Nothing, Task}
+mutable struct CoroutineBehavior{T} <: Behavior
+  agent::Union{Nothing,Agent}
+  block::Union{Nothing,Threads.Condition}
+  timer::Union{Nothing,Timer}
+  done::Bool
+  priority::Int
+  action::T
+  control_task::Union{Nothing,Task}
+  action_task::Union{Nothing,Task}
 end
 
 """
@@ -36,43 +35,41 @@ function Fjage.startup(a::MyAgent)
 end
 ```
 """
-function CoroutineBehavior(action)
-    return CoroutineBehavior(
-        nothing, # agent
-        nothing, # block
-        nothing, # timer
-        false,   # done
-        0,       # priority
-        action,  # action
-        nothing, # control_task
-        nothing, # action_task
-    )
-end
+CoroutineBehavior(action) = CoroutineBehavior{typeof(action)}(
+  nothing, # agent
+  nothing, # block
+  nothing, # timer
+  false,   # done
+  0,       # priority
+  action,  # action
+  nothing, # control_task
+  nothing, # action_task
+)
 
 function action(b::CoroutineBehavior)
-    b.control_task = current_task()
-    b.action_task = Task() do
-        logerror(b.agent) do
-            b.action(b.agent, b)
-        end
-        b.done = true
-        yieldto(b.control_task)
-    end
+  b.control_task = current_task()
+  b.action_task = Task() do
     logerror(b.agent) do
-        while !b.done
-            if !isnothing(b.block)
-                lock(() -> wait(b.block), b.block)
-            end
-            _mutex_call(b.agent) do agent
-                yieldto(b.action_task)
-            end
-        end
+      b.action(b.agent, b)
     end
     b.done = true
-    b.control_task = nothing
-    b.action_task = nothing
-    delete!(b.agent._behaviors, b)
-    b.agent = nothing
+    yieldto(b.control_task)
+  end
+  logerror(b.agent) do
+    while !b.done
+      if !isnothing(b.block)
+        lock(() -> wait(b.block), b.block)
+      end
+      _mutex_call(b.agent) do agent
+        yieldto(b.action_task)
+      end
+    end
+  end
+  b.done = true
+  b.control_task = nothing
+  b.action_task = nothing
+  delete!(b.agent._behaviors, b)
+  b.agent = nothing
 end
 
 """
@@ -85,9 +82,10 @@ block has expired. Unlike `Base.sleep()`, this function releases the lock on the
 behavior's agent.
 """
 function delay(b::CoroutineBehavior, millis)
-    if current_task() != b.action_task
-        @error "delay(::CoroutineBehavior, t) has been called outside of the appropriate action context!"
-    end
-    block(b, millis)
-    yieldto(b.control_task)
+  if current_task() != b.action_task
+    @error "delay(::CoroutineBehavior, t) has been called outside of the appropriate action context!"
+  end
+  block(b, millis)
+  yieldto(b.control_task)
+  nothing
 end
