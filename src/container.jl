@@ -382,8 +382,12 @@ function Base.kill(c::Container, aid::String)
   a._container = nothing
   a._aid = nothing
   empty!(a._behaviors)
-  foreach(kv -> delete!(kv[2], a), c.topics)
-  foreach(kv -> delete!(kv[2], AgentID(aid)), c.services)
+  for kv ∈ c.topics
+    delete!(kv[2], a)
+  end
+  for kv ∈ c.services
+    delete!(kv[2], AgentID(aid))
+  end
   delete!(c.agents, aid)
   @debug "Killed agent $(aid)"
   true
@@ -407,11 +411,13 @@ function start(c::StandaloneContainer)
   @debug "Starting StandaloneContainer..."
   c.running[] = true
   c.initing[] = true
-  foreach(kv -> init(kv[2]), c.agents)
+  for kv ∈ c.agents
+    init(kv[2])
+  end
   @debug "StandaloneContainer is running"
   c.initing[] = false
-  foreach(c.agents) do kv
-    foreach(kv[2]._behaviors) do b
+  for kv ∈ c.agents
+    for b ∈ kv[2]._behaviors
       @async action(b)
     end
   end
@@ -431,7 +437,9 @@ function start(c::SlaveContainer)
   @debug "SlaveContainer connected"
   c.running[] = true
   c.initing[] = true
-  foreach(kv -> init(kv[2]), c.agents)
+  for kv ∈ c.agents
+    init(kv[2])
+  end
   _update_watch(c)
   @debug "SlaveContainer is running"
   # behaviors to be started and c.initing[] reset on _alive()
@@ -442,8 +450,8 @@ end
 function _alive(c::SlaveContainer)
   c.initing[] || return
   c.initing[] = false
-  foreach(c.agents) do kv
-    foreach(kv[2]._behaviors) do b
+  for kv ∈ c.agents
+    for b ∈ kv[2]._behaviors
       @async action(b)
     end
   end
@@ -457,7 +465,9 @@ Stop a container and all agents running in it.
 function shutdown(c::StandaloneContainer)
   c.running[] || return
   @debug "Stopping StandaloneContainer..."
-  foreach(name -> kill(c, name), keys(c.agents))
+  for name ∈ keys(c.agents)
+    kill(c, name)
+  end
   empty!(c.agents)
   empty!(c.topics)
   empty!(c.services)
@@ -469,7 +479,9 @@ end
 function shutdown(c::SlaveContainer)
   c.running[] || return
   @debug "Stopping SlaveContainer..."
-  foreach(name -> kill(c, name), keys(c.agents))
+  for name ∈ keys(c.agents)
+    kill(c, name)
+  end
   empty!(c.agents)
   empty!(c.topics)
   empty!(c.services)
@@ -508,7 +520,9 @@ end
 Unsubscribe `agent` running in container `c` from `topic`.
 """
 function unsubscribe(c::StandaloneContainer, a::Agent)
-  foreach(t -> delete!(c.topics[t], a), keys(c.topics))
+  for t ∈ keys(c.topics)
+    delete!(c.topics[t], a)
+  end
   nothing
 end
 
@@ -532,7 +546,9 @@ end
 Unsubscribe `agent` running in container `c` from all topics.
 """
 function unsubscribe(c::SlaveContainer, a::Agent)
-  foreach(t -> delete!(c.topics[t], a), keys(c.topics))
+  for t ∈ keys(c.topics)
+    delete!(c.topics[t], a)
+  end
   _update_watch(c)
   nothing
 end
@@ -562,7 +578,9 @@ end
 Deregister agent `aid` from providing any services.
 """
 function deregister(c::Container, aid::AgentID)
-  foreach(svc -> delete!(c.services[svc], aid), keys(c.services))
+  for svc ∈ keys(c.services)
+    delete!(c.services[svc], aid)
+  end
   nothing
 end
 
@@ -608,7 +626,7 @@ end
 function agentsforservice(c::SlaveContainer, svc::String, owner::Agent)
   rq = Dict("action" => "agentsForService", "service" => svc)
   rsp = _ask(c, rq)
-  [AgentID(a, false, owner) for a in rsp["agentIDs"]]
+  [AgentID(a, false, owner) for a ∈ rsp["agentIDs"]]
 end
 
 """
@@ -635,7 +653,7 @@ function ps(c::SlaveContainer)
   if "agentTypes" ∈ keys(rsp) && length(rsp["agentIDs"]) == length(rsp["agentTypes"])
     return collect(zip(rsp["agentIDs"], rsp["agentTypes"]))
   end
-  [(a, "") for a in rsp["agentIDs"]]
+  [(a, "") for a ∈ rsp["agentIDs"]]
 end
 
 function _deliver(c::StandaloneContainer, msg::Message)
@@ -643,7 +661,9 @@ function _deliver(c::StandaloneContainer, msg::Message)
   if name(msg.recipient) ∈ keys(c.agents)
     _deliver(c.agents[name(msg.recipient)], msg)
   elseif msg.recipient ∈ keys(c.topics)
-    foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
+    for a ∈ c.topics[msg.recipient]
+      _deliver(a, msg)
+    end
   else
     @debug "Message $(msg) undeliverable"
     return false
@@ -686,7 +706,9 @@ function _deliver(c::SlaveContainer, msg::Message, relay::Bool)
   end
   # message for local topics
   if msg.recipient ∈ keys(c.topics) && _islocal(c, msg.recipient)
-    foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
+    for a ∈ c.topics[msg.recipient]
+      _deliver(a, msg)
+    end
   end
   # message to get master container to relay
   if relay
@@ -1185,9 +1207,15 @@ receive(a::Agent, timeout::Int=0) = receive(a, nothing, timeout)
     request(a::Agent, msg::Message)
     request(a::Agent, msg::Message, timeout::Int)
 
-Send a request and wait for a response. If a timeout is specified, the call blocks
-for at most `timeout` milliseconds. If no timeout is specified, a system default
-is used. Returns the response message or `nothing` if no response received.
+Send a request to the specified agent, and wait for a response.
+The `recipient` field of the request message (`msg`) must be populated with an agentID.
+The timeout is specified in milliseconds, and defaults to 1 second if unspecified.
+The default timeout can be changed by calling `default_timeout(millis)`.
+
+If `T` is specified, the response is expected to be of type `T` or `nothing` if the request times out.
+Since the response message may be of any type, type inference cannot proceed unless the return type is
+explicitly specified by the caller. Therefore, it is recommended that the caller specify the expected type
+of the response message explicitly when possible.
 """
 function request(a::Agent, msg::Message, timeout::Int=timeout[])
   timeout == 0 && throw(ArgumentError("request must use a non-zero timeout"))
