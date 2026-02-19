@@ -436,10 +436,17 @@ end
 
 """
     rsp = request(gw, msg[, timeout])
+    rsp = request(gw, msg, T[, timeout])
 
-Send a request via the gateway to the specified agent, and wait for a response. The response is returned.
-The `recipient` field of the request message (`msg`) must be populated with an agentID. The timeout
-is specified in milliseconds, and defaults to 1 second if unspecified.
+Send a request via the gateway to the specified agent, and wait for a response.
+The `recipient` field of the request message (`msg`) must be populated with an agentID.
+The timeout is specified in milliseconds, and defaults to 1 second if unspecified.
+The default timeout can be changed by calling `default_timeout(millis)`.
+
+If `T` is specified, the response is expected to be of type `T` or `nothing` if the request times out.
+Since the response message may be of any type, type inference cannot proceed unless the return type is
+explicitly specified by the caller. Therefore, it is recommended that the caller specify the expected type
+of the response message explicitly when possible.
 """
 function request(gw::Gateway, msg, timeout=1000)
   send(gw, msg) || return nothing
