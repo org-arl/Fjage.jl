@@ -128,7 +128,7 @@ function registermessages(msg=subtypes(Message))
   for T ∈ msg
     T <: GenericMessage && continue
     if applicable(classname, T)
-      s = classname(T)
+      s = classname(T)::String
       _messageclasses[s] = T
     end
     registermessages(subtypes(T))
@@ -148,7 +148,7 @@ function _matches(filt, msg)
   elseif typeof(filt) <: Message
     return msg.inReplyTo == filt.messageID
   elseif typeof(filt) <: Function
-    return filt(msg)
+    return filt(msg)::Bool
   end
   false
 end
