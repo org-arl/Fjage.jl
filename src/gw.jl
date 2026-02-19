@@ -57,23 +57,16 @@ function _println(sock, s)
   end
 end
 
-function _merge!(d1, d2)
-  for (k, v) ∈ d2
-    d1[k] = v
-  end
-  d1
-end
-
 # respond to master container
 function _respond(gw, rq, rsp)
-  s = JSON.json(_merge!(JsonObject("id" => rq["id"], "inResponseTo" => rq["action"]), rsp))
+  s = JSON.json(merge!(JsonObject("id" => rq["id"], "inResponseTo" => rq["action"]), rsp))
   _println(gw.sock[], s)
 end
 
 # ask master container a question, and wait for reply
 function _ask(gw, rq)
   id = string(uuid4())
-  s = JSON.json(_merge!(JsonObject("id" => id), rq))
+  s = JSON.json(merge!(JsonObject("id" => id), rq))
   ch = Channel{JsonObject}(1)
   gw.pending[id] = ch
   try
@@ -133,6 +126,7 @@ function _run(gw)
         json = try
           JSON.parse(s)
         catch
+          @warn "Failed to parse JSON: $s"
           JsonObject()
         end
         if haskey(json, "id") && haskey(gw.pending, json["id"])
