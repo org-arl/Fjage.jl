@@ -127,7 +127,7 @@ function _run(gw)
           JSON.parse(s)
         catch
           length(s) == 0 || @warn "Failed to parse JSON: $s"
-          JsonObject()
+          continue
         end
         if haskey(json, "id") && haskey(gw.pending, json["id"])
           put!(gw.pending[json["id"]], json)
