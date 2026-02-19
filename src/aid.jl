@@ -34,6 +34,10 @@ name(aid::AgentID) = aid.name
 owner(aid::AgentID) = aid.owner
 istopic(aid::AgentID) = aid.istopic
 
+# AgentIDs are equal irrespective of their owner if other fields are the same
+Base.:(==)(x::AgentID, y::AgentID) = x.name == y.name && x.istopic == y.istopic
+Base.hash(x::AgentID, h::UInt) = hash(x.name, hash(x.istopic, h))
+
 """
     send(aid, msg)
 
