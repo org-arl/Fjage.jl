@@ -121,12 +121,12 @@ function _run(gw)
       _println(gw.sock[], "{\"action\": \"auth\", \"name\": \"$(name(gw))\"}")
       _update_watch(gw)
       while isopen(gw.sock[])
-        s = readline(gw.sock[])
+        s = strip(readline(gw.sock[]))
         @debug "<< $s"
         json = try
           JSON.parse(s)
         catch
-          @warn "Failed to parse JSON: $s"
+          length(s) == 0 || @warn "Failed to parse JSON: $s"
           JsonObject()
         end
         if haskey(json, "id") && haskey(gw.pending, json["id"])
