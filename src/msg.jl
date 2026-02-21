@@ -157,7 +157,7 @@ end
 function trysetproperty!(s::Message, p::Symbol, v)
   hasfield(typeof(s), p) || return s
   ftype = fieldtype(typeof(s), p)
-  ftype === Symbol && (v = Symbol(v))
+  Symbol <: ftype && (v = Symbol(v))
   Vector{UInt8} <: ftype  && v isa Vector{Int8} && (v = reinterpret(UInt8, v))
   if v === nothing
     ftype === Float32 && (v = NaN32)
