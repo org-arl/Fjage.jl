@@ -153,11 +153,17 @@ function _matches(filt, msg)
   false
 end
 
+# check if T is Symbol or a Union type that includes Symbol
+function _is_symbol_type(T)
+  T === Symbol && return true
+  T isa Union && any(==(Symbol), Base.uniontypes(T))
+end
+
 # like Base.setproperty!, but does not throw an error if the property does not exist
 function trysetproperty!(s::Message, p::Symbol, v)
   hasfield(typeof(s), p) || return s
   ftype = fieldtype(typeof(s), p)
-  Symbol <: ftype && (v = Symbol(v))
+  _is_symbol_type(ftype) && (v = Symbol(v))
   Vector{UInt8} <: ftype  && v isa Vector{Int8} && (v = reinterpret(UInt8, v))
   if v === nothing
     ftype === Float32 && (v = NaN32)
