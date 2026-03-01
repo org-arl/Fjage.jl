@@ -684,9 +684,18 @@ function _deliver(c::SlaveContainer, msg::Message, relay::Bool)
     _deliver(c.agents[name(msg.recipient)], msg)
     return true
   end
-  # message for local topics
-  if msg.recipient ∈ keys(c.topics) && _islocal(c, msg.recipient)
-    foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
+  # message for local topics / subscribed remote topics
+  if msg.recipient ∈ keys(c.topics)
+    if _islocal(c, msg.recipient)
+      # we own the topic, so deliver to all local subscribers
+      foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
+    elseif name(msg.sender) ∈ keys(c.agents)
+      # sender is local, so deliver to all local subscribers only on the way out
+      relay && foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
+    else
+      # sender is remote, so deliver to all local subscribers
+      foreach(a -> _deliver(a, msg), c.topics[msg.recipient])
+    end
   end
   # message to get master container to relay
   if relay
