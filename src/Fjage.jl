@@ -2,7 +2,8 @@
 Julia-fjåge gateway, standalone container, and slave container.
 
 Notes:
-- This implementation is not thread-safe.
+- The `Gateway` is not thread-safe, and should only be used from a single task/thread.
+- Containers and agents are designed to be safe to use from multiple threads.
 """
 module Fjage
 
