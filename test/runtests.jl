@@ -318,6 +318,8 @@ finally
   kill(master)
 end
 
+include("container_tests.jl")
+
 @testset "CoroutineBehavior" begin
 
   c = Container()
