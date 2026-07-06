@@ -1357,24 +1357,33 @@ restarted after `millis` milliseconds.
 """
 function block(b::Behavior)
   done(b) && return
+  b.block === nothing || return
   b.block = Threads.Condition()
   nothing
 end
 
 function block(b::Behavior, millis)
   done(b) && return
+  b.block === nothing || return
   b.block = Threads.Condition()
-  b.timer = Timer(millis/1000)
+  t = Timer(millis/1000)
+  b.timer = t
   @async begin
     try
-      wait(b.timer)
+      wait(t)
     finally
-      b.timer = nothing
-      restart(b)
+      if b.timer === t
+        b.timer = nothing
+        restart(b)
+      end
     end
   end
   nothing
 end
+
+# b.block and b.timer are plain fields that may be written from multiple threads;
+# the identity checks against a locally captured copy, performed while holding the
+# condition's lock, are what make the block/restart/reset protocol safe.
 
 """
     restart(b::Behavior)
@@ -1382,15 +1391,34 @@ end
 Restart a blocked behavior, previous blocked by `block(b)`.
 """
 function restart(b::Behavior)
-  oblock = b.block
-  oblock === nothing && return
-  if b.timer !== nothing
-    close(b.timer)
+  b.block === nothing && return
+  t = b.timer
+  if t !== nothing
+    close(t)
     return nothing
   end
+  _release_block(b)
+end
+
+# release anyone waiting on a behavior's block condition
+function _release_block(b::Behavior)
+  oblock = b.block
+  oblock === nothing && return
   lock(oblock) do
-    b.block = nothing
+    b.block === oblock && (b.block = nothing)
     notify(oblock)
+  end
+  nothing
+end
+
+# wait until a behavior is no longer blocked (or is done)
+function _wait_for_restart(b::Behavior)
+  while !done(b)
+    oblock = b.block
+    oblock === nothing && return
+    lock(oblock) do
+      b.block === oblock && wait(oblock)
+    end
   end
   nothing
 end
@@ -1403,9 +1431,10 @@ reset, it may be reused later by adding it to an agent.
 """
 function reset(b::Behavior)
   b.agent === nothing || delete!(b.agent._behaviors, b)
-  b.timer === nothing || close(b.timer)
+  t = b.timer
+  t === nothing || close(t)
+  _release_block(b)
   b.agent = nothing
-  b.block = nothing
   b.timer = nothing
   b.done = false
   nothing
@@ -1478,8 +1507,7 @@ OneShotBehavior(action) = OneShotBehavior(nothing, nothing, nothing, false, 0, n
 function action(b::OneShotBehavior)
   try
     b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
-    oblock = b.block
-    oblock === nothing || lock(() -> b.block === nothing || wait(oblock), oblock)
+    _wait_for_restart(b)
     b.action === nothing || _mutex_call(b.action, b.agent, b)
     b.onend === nothing || _mutex_call(b.onend, b.agent, b)
   catch ex
@@ -1532,8 +1560,7 @@ function action(b::CyclicBehavior)
   try
     b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     while !b.done
-      oblock = b.block
-      if oblock === nothing
+      if b.block === nothing
         try
           b.action === nothing || _mutex_call(b.action, b.agent, b)
         catch ex
@@ -1541,7 +1568,7 @@ function action(b::CyclicBehavior)
         end
         yield()
       else
-        lock(() -> b.block === nothing || wait(oblock), oblock)
+        _wait_for_restart(b)
       end
     end
     b.onend === nothing || _mutex_call(b.onend, b.agent, b)
@@ -1627,8 +1654,7 @@ function action(b::WakerBehavior)
     b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     while !b.done
       block(b, b.millis)
-      oblock = b.block
-      oblock === nothing || lock(() -> b.block === nothing || wait(oblock), oblock)
+      _wait_for_restart(b)
       if !b.done
         b.done = true
         b.action === nothing || _mutex_call(b.action, b.agent, b)
@@ -1703,8 +1729,7 @@ function action(b::TickerBehavior)
     b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     while !b.done
       block(b, b.millis)
-      oblock = b.block
-      oblock === nothing || lock(() -> b.block === nothing || wait(oblock), oblock)
+      _wait_for_restart(b)
       b.ticks += 1
       try
         b.done || b.action === nothing || _mutex_call(b.action, b.agent, b)
@@ -1771,8 +1796,7 @@ function action(b::PoissonBehavior)
     b.onstart === nothing || _mutex_call(b.onstart, b.agent, b)
     while !b.done
       block(b, round(Int64, b.millis * randexp()))
-      oblock = b.block
-      oblock === nothing || lock(() -> b.block === nothing || wait(oblock), oblock)
+      _wait_for_restart(b)
       b.ticks += 1
       try
         b.done || b.action === nothing || _mutex_call(b.action, b.agent, b)

@@ -106,9 +106,10 @@ function reset(b::FSMBehavior)
   end
   empty!(b.wakers)
   b.agent === nothing || delete!(b.agent._behaviors, b)
-  b.timer === nothing || close(b.timer)
+  t = b.timer
+  t === nothing || close(t)
+  _release_block(b)
   b.agent = nothing
-  b.block = nothing
   b.timer = nothing
   b.state = INIT
   b.prevstate = INIT
@@ -218,7 +219,7 @@ function action(b::FSMBehavior)
         end
         yield()
       else
-        lock(() -> wait(b.block), b.block)
+        _wait_for_restart(b)
       end
     end
   catch ex

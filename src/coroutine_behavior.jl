@@ -60,9 +60,7 @@ function action(b::CoroutineBehavior)
     end
     logerror(b.agent) do
         while !b.done
-            if !isnothing(b.block)
-                lock(() -> wait(b.block), b.block)
-            end
+            _wait_for_restart(b)
             _mutex_call(b.agent) do agent
                 yieldto(b.action_task)
             end
