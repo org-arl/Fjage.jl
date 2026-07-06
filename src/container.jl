@@ -1178,13 +1178,16 @@ function receive(a::Agent, filt, timeout::Int=0; priority=(filt===nothing ? 0 : 
   if timeout > 0
     @async begin
       delay(a, timeout)
-      put!(ch, nothing)
+      try
+        put!(ch, nothing)
+      catch
+        # channel already closed; ignore
+      end
     end
   end
   lock(() -> notify(a._processmsg, true), a._processmsg)
   msg = take!(ch)
-  _dont_listen(a, ch)
-  close(ch)
+  _stop_listening(a, ch)
   msg
 end
 
@@ -1207,12 +1210,15 @@ function request(a::Agent, msg::Message, timeout::Int=timeout[])
   if timeout > 0
     @async begin
       delay(a, timeout)
-      put!(ch, nothing)
+      try
+        put!(ch, nothing)
+      catch
+        # channel already closed; ignore
+      end
     end
   end
   msg = take!(ch)
-  _dont_listen(a, ch)
-  close(ch)
+  _stop_listening(a, ch)
   msg
 end
 
@@ -1246,10 +1252,30 @@ function _dont_listen(a::Agent, ch::Channel)
   end
 end
 
+# stop listening on a channel, and re-deliver any messages left behind in it
+#
+# The channel is closed before deregistering, so that a sender blocked on a
+# `put!` into a full channel is woken (with an exception) rather than deadlocking
+# against `_dont_listen` on the `_processmsg` lock (see issue #36). All `put!`s
+# into listener channels hold the `_processmsg` lock, so once `_dont_listen`
+# returns, no new message can arrive and the channel can be safely drained.
+function _stop_listening(a::Agent, ch::Channel)
+  close(ch)
+  _dont_listen(a, ch)
+  while isready(ch)
+    m = take!(ch)
+    m isa Message && _deliver(a, m)
+  end
+end
+
 function _listener_notify(a::Agent)
   lock(a._processmsg) do
     for (filt, ch, p) ∈ a._listeners
-      put!(ch, nothing)
+      try
+        isready(ch) || put!(ch, nothing)
+      catch
+        # channel closed by a listener that is deregistering; ignore
+      end
     end
   end
 end
@@ -1278,15 +1304,23 @@ end
 function _msgloop(a::Agent)
   @debug "Start $(a) message loop"
   lock(a._processmsg) do
-    while wait(a._processmsg)
+    keepgoing = true
+    while keepgoing
+      # deliver before waiting, since messages may have arrived (and notifications
+      # been lost) before this loop started or between sweeps
       try
         @debug "Deliver messages in $(a) [qlen=$(length(a._msgqueue))]"
         filter!(a._msgqueue) do msg
           for (filt, ch, p) ∈ a._listeners
             if _matches(filt, msg)
               isready(ch) && return true
-              put!(ch, msg)
-              return false
+              try
+                put!(ch, msg)
+                return false
+              catch
+                # channel closed by a listener that is deregistering; keep message
+                return true
+              end
             end
           end
           true
@@ -1294,6 +1328,7 @@ function _msgloop(a::Agent)
       catch ex
         @warn "Message delivery failed: $(ex)"
       end
+      keepgoing = wait(a._processmsg)
     end
   end
   @debug "Stop $(a) message loop"
@@ -1869,7 +1904,7 @@ end
 ```
 """
 MessageBehavior(action) = MessageBehavior(nothing, nothing, nothing, nothing, false, 0, nothing, action, nothing)
-MessageBehavior(action, filt) = MessageBehavior(nothing, filt, nothing, false, (filt===nothing ? 0 : -100), nothing, action, nothing)
+MessageBehavior(action, filt) = MessageBehavior(nothing, filt, nothing, nothing, false, (filt===nothing ? 0 : -100), nothing, action, nothing)
 
 function action(b::MessageBehavior)
   ch = Channel{Union{Message,Nothing}}(1)
@@ -1889,8 +1924,7 @@ function action(b::MessageBehavior)
   catch ex
     reconnect(container(b.agent), ex) || logerror(b.agent)
   finally
-    _dont_listen(b.agent, ch)
-    close(ch)
+    _stop_listening(b.agent, ch)
   end
   b.done = true
   delete!(b.agent._behaviors, b)
