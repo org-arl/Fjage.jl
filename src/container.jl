@@ -1270,6 +1270,7 @@ function _deliver(a::Agent, msg::Message)
     push!(a._msgqueue, msg)
     while length(a._msgqueue) > MAX_QUEUE_LEN
       popfirst!(a._msgqueue)
+      Threads.atomic_add!(_dropped_msgs, 1)
     end
     notify(a._processmsg, true)
   end
