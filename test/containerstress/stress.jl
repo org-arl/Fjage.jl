@@ -98,25 +98,53 @@ end
 
 # ---------------------------------------------------------------- java master
 
-const MAVEN = "https://repo1.maven.org/maven2"
+const GH_MAVEN = "https://maven.pkg.github.com/org-arl/fjage/com/github/org-arl/fjage"
+const MAVEN_CENTRAL = "https://repo1.maven.org/maven2"
 const GSON_VERSION = "2.10.1"
 
-# fetch the latest released fjage jar (and gson, needed by its JSON protocol)
-# from Maven Central into lib/; --version pins a specific fjage release
+# GitHub Packages requires a token (scope read:packages) even for public downloads
+function _github_token()
+  for k ∈ ("GITHUB_TOKEN", "GH_TOKEN")
+    isempty(get(ENV, k, "")) || return ENV[k]
+  end
+  try
+    tok = strip(read(`gh auth token`, String))
+    isempty(tok) || return tok
+  catch
+  end
+  error("a GitHub token is needed to download fjage from GitHub Packages — " *
+        "set GITHUB_TOKEN (scope read:packages) or run `gh auth refresh -h github.com -s read:packages`")
+end
+
+function _gh_get(url, tok, dest=IOBuffer())
+  try
+    Downloads.download(url, dest; headers=["Authorization" => "Bearer $tok"])
+  catch e
+    error("download failed for $url — if this is a 401/403, your GitHub token " *
+          "lacks the read:packages scope (`gh auth refresh -h github.com -s read:packages`); ($e)")
+  end
+  dest
+end
+
+# fetch the current fjage release jar from the org-arl GitHub Packages registry
+# (and gson, needed by its JSON protocol, from Maven Central) into lib/;
+# --version pins a specific release
 function ensure_jars(version)
   lib = joinpath(@__DIR__, "lib")
   mkpath(lib)
+  tok = _github_token()
   if isempty(version)
-    meta = sprint(io -> Downloads.download("$MAVEN/com/github/org-arl/fjage/maven-metadata.xml", io))
-    m = match(r"<release>([^<]+)</release>", meta)
-    m === nothing && error("cannot determine latest fjage release from Maven Central")
+    meta = String(take!(_gh_get("$GH_MAVEN/maven-metadata.xml", tok)))
+    m = something(match(r"<release>([^<]+)</release>", meta),
+                  match(r"<latest>([^<]+)</latest>", meta), Some(nothing))
+    m === nothing && error("cannot determine current fjage release from GitHub Packages metadata")
     version = m.captures[1]
-    @info "Latest fjage release" version
+    @info "Current fjage release" version
   end
   fjage = joinpath(lib, "fjage-$version.jar")
-  isfile(fjage) || Downloads.download("$MAVEN/com/github/org-arl/fjage/$version/fjage-$version.jar", fjage)
+  isfile(fjage) || _gh_get("$GH_MAVEN/$version/fjage-$version.jar", tok, fjage)
   gson = joinpath(lib, "gson-$GSON_VERSION.jar")
-  isfile(gson) || Downloads.download("$MAVEN/com/google/code/gson/gson/$GSON_VERSION/gson-$GSON_VERSION.jar", gson)
+  isfile(gson) || Downloads.download("$MAVEN_CENTRAL/com/google/code/gson/gson/$GSON_VERSION/gson-$GSON_VERSION.jar", gson)
   fjage, gson
 end
 

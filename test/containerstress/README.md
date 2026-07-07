@@ -31,9 +31,10 @@ behavior makes the run FAIL (exit 1).
   block/restart/stop protocol continuously; secondaries whose task never
   terminates after `stop()` are reported as `stuck_behaviors`.
 - The Java side is plain Java (`java/org/arl/fjage/stress/`), compiled on the fly
-  with `javac` against the **latest released fjage jar**, which is downloaded
-  automatically from Maven Central into `lib/` on first run (pin a version with
-  `--version x.y.z`). The Java agents are message-controlled (`StressCtl`
+  with `javac` against the **current fjage release**, which is downloaded
+  automatically from the org-arl **GitHub Packages** Maven registry into `lib/`
+  on first run (pin a version with `--version x.y.z`; gson comes from Maven
+  Central). The Java agents are message-controlled (`StressCtl`
   start/stop/stats), so one binary serves all configurations.
 
 ## Requirements
@@ -41,6 +42,9 @@ behavior makes the run FAIL (exit 1).
 - Julia (run with several threads, e.g. `-t 8` — the races this hunts are
   thread-sensitive).
 - JDK 8+ (`javac`, `java`) and internet access on first run, for slave mode.
+- A GitHub token with the `read:packages` scope (GitHub Packages requires this
+  even for public downloads): either set `GITHUB_TOKEN`, or be logged in with the
+  `gh` CLI (`gh auth refresh -h github.com -s read:packages` adds the scope).
 
 ## Single run
 
