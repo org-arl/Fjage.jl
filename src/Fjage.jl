@@ -15,6 +15,7 @@ export BLOCKING
 
 const BLOCKING = -1
 const MAX_QUEUE_LEN = 256
+const _dropped_msgs = Threads.Atomic{Int}(0)
 const VERSION = @PkgVersion.Version
 
 const timeout = Ref(1000)
