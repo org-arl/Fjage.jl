@@ -6,7 +6,7 @@ Slave containers are used to connect to Java master containers that host
 multi-language agent applications.
 
 The agents, behaviors and containers API is modeled on the Java version, and
-hence the [fjåge developer's guide](https://fjage.readthedocs.io/en/latest/)
+hence the [fjåge developer's guide](https://org-arl.github.io/fjage/)
 provides a good introduction to developing agents.
 
 ## Example
