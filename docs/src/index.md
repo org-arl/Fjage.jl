@@ -31,5 +31,6 @@ pkg> add Fjage
 ### Useful reading
 
 - [fjåge home](https://github.com/org-arl/fjage)
-- [fjåge developer's guide](https://fjage.readthedocs.io/en/latest/)
+- [fjåge developer's guide](https://org-arl.github.io/fjage/)
+- [Julia gateway chapter of the fjåge developer's guide](https://org-arl.github.io/fjage/juliagw.html)
 - [fjåge gateway API specifications](https://github.com/org-arl/fjage/blob/master/gateways/Gateways.md)
