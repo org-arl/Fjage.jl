@@ -20,6 +20,7 @@ struct Gateway
   port::Int
   reconnect::Ref{Bool}
   function Gateway(name::String, host, port::Int; reconnect=true)
+    startswith(name, "gateway-") || (name = "gateway-" * name)  # spec: gateway agent names are prefixed "gateway-"
     gw = new(
       AgentID(name, false),
       Ref(connect(host, port)),
@@ -64,6 +65,7 @@ function _respond(gw, rq, rsp)
 end
 
 # ask master container a question, and wait for reply
+# 2-arg: blocks indefinitely; used by SlaveContainer (container.jl). Left untouched.
 function _ask(gw, rq)
   id = string(uuid4())
   s = JSON.json(merge!(JsonObject("id" => id), rq))
@@ -72,6 +74,28 @@ function _ask(gw, rq)
   try
     _println(gw.sock[], s)
     return take!(ch)
+  finally
+    delete!(gw.pending, id)
+  end
+end
+
+# 3-arg: bounded/timeout variant; used only by the Gateway discovery methods below.
+# timeout (ms): < 0 blocks forever, 0 is non-blocking, otherwise waits up to timeout
+# and returns an empty JsonObject() on timeout (interpreted as "not found").
+function _ask(gw, rq, timeout)
+  timeout < 0 && return _ask(gw, rq)   # block forever (delegates to the 2-arg method)
+  id = string(uuid4())
+  s = JSON.json(merge!(JsonObject("id" => id), rq))
+  ch = Channel{JsonObject}(1)
+  gw.pending[id] = ch
+  try
+    _println(gw.sock[], s)
+    timeout == 0 && return isready(ch) ? take!(ch) : JsonObject()
+    # _run() is the sole producer into ch and this is the sole consumer, so there is
+    # no producer race: we only ever read (isready) or take!, never put!/close ch. If
+    # the reply lands after we give up, it harmlessly fills the (then-abandoned)
+    # channel, and the finally-delete! makes _run() ignore any later reply for this id.
+    timedwait(() -> isready(ch), timeout / 1e3; pollint=0.001) === :ok ? take!(ch) : JsonObject()
   finally
     delete!(gw.pending, id)
   end
@@ -191,17 +215,39 @@ AgentID(gw::Gateway) = gw.agentID
 agent(gw::Gateway, name::String) = AgentID(name, false, gw)
 
 "Find an agent that provides a named service."
-function agentforservice(gw::Gateway, svc::String)
+function agentforservice(gw::Gateway, svc::AbstractString, timeout=6000)
   rq = JsonObject("action" => "agentForService", "service" => svc)
-  rsp = _ask(gw, rq)
+  rsp = _ask(gw, rq, timeout)
   haskey(rsp, "agentID") ? AgentID(rsp["agentID"], false, gw) : nothing
 end
 
-"Find all agents that provides a named service."
-function agentsforservice(gw::Gateway, svc::String)
+"Find all agents that provide a named service."
+function agentsforservice(gw::Gateway, svc::AbstractString, timeout=6000)
   rq = JsonObject("action" => "agentsForService", "service" => svc)
-  rsp = _ask(gw, rq)
-  [AgentID(a, false, gw) for a ∈ rsp["agentIDs"]]
+  rsp = _ask(gw, rq, timeout)
+  haskey(rsp, "agentIDs") ? [AgentID(a, false, gw) for a ∈ rsp["agentIDs"]] : AgentID[]
+end
+
+"Find all agents running on the master container."
+function agents(gw::Gateway, timeout=6000)
+  rq = JsonObject("action" => "agents")
+  rsp = _ask(gw, rq, timeout)
+  haskey(rsp, "agentIDs") ? [AgentID(a, false, gw) for a ∈ rsp["agentIDs"]] : AgentID[]
+end
+
+"Check if an agent is running on the master container."
+containsagent(gw::Gateway, aid::AgentID, timeout=6000) = containsagent(gw, aid.name, timeout)
+function containsagent(gw::Gateway, aid::AbstractString, timeout=6000)
+  rq = JsonObject("action" => "containsAgent", "agentID" => aid)
+  rsp = _ask(gw, rq, timeout)
+  haskey(rsp, "answer") ? rsp["answer"]::Bool : false
+end
+
+"Find all services available on the master container."
+function services(gw::Gateway, timeout=6000)
+  rq = JsonObject("action" => "services")
+  rsp = _ask(gw, rq, timeout)
+  haskey(rsp, "services") ? Vector{String}(rsp["services"]) : String[]
 end
 
 "Subscribe to receive all messages sent to the given topic."

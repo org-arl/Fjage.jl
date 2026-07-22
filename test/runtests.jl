@@ -52,6 +52,39 @@ try
       @test length(alist) == 0
     end
 
+    @testset "agentforservice (timeout arg)" begin
+      s2 = agentforservice(gw, "org.arl.fjage.shell.Services.SHELL", 3000)
+      @test typeof(s2) <: AgentID
+      @test s2.name == "shell"
+      # short timeout to a bogus service returns nothing without hanging
+      @test agentforservice(gw, "org.arl.dummy.Services.DUMMY", 500) === nothing
+    end
+
+    @testset "agents" begin
+      alist = agents(gw)
+      @test typeof(alist) <: Array
+      @test !isempty(alist)
+      @test any(a -> a.name == "shell", alist)
+    end
+
+    @testset "containsagent" begin
+      @test containsagent(gw, "shell") == true
+      @test containsagent(gw, AgentID("shell")) == true
+      @test containsagent(gw, "org.arl.dummy.NoSuchAgent") == false
+    end
+
+    @testset "services" begin
+      svcs = services(gw)
+      @test typeof(svcs) <: Array
+      @test !isempty(svcs)
+    end
+
+    @testset "gateway- name prefix" begin
+      gw2 = Gateway("myclient", "localhost", 5081)
+      @test name(gw2) == "gateway-myclient"
+      close(gw2)
+    end
+
     abstract type MyAbstractReq <: Message end
     @message "org.arl.fjage.test.MyAbstractReq" struct MyAbstractReq <: MyAbstractReq end
     @message "org.arl.fjage.test.MyReq" Performative.AGREE struct MyReq <: MyAbstractReq end
