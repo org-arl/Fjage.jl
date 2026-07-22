@@ -85,6 +85,18 @@ try
       close(gw2)
     end
 
+    @testset "AbstractString names accepted" begin
+      # SubString (e.g. from strip/split) must be accepted, not only String
+      svc = strip("  org.arl.fjage.shell.Services.SHELL  ")
+      @test svc isa SubString{String}
+      @test agentforservice(gw, svc).name == "shell"
+      @test length(agentsforservice(gw, svc)) == 1
+      nm = split("shell,ignored", ",")[1]
+      @test nm isa SubString{String}
+      @test containsagent(gw, nm) == true
+      @test agent(gw, nm).name == "shell"
+    end
+
     abstract type MyAbstractReq <: Message end
     @message "org.arl.fjage.test.MyAbstractReq" struct MyAbstractReq <: MyAbstractReq end
     @message "org.arl.fjage.test.MyReq" Performative.AGREE struct MyReq <: MyAbstractReq end

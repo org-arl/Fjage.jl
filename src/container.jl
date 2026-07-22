@@ -231,7 +231,7 @@ name(c::Container) = c.name[]
 
 Set name of the container.
 """
-name!(c::Container, s::String) = (c.name[] = s)
+name!(c::Container, s::AbstractString) = (c.name[] = s)
 
 function Base.show(io::IO, c::Container)
   print(io, typeof(c), "[name=\"", name(c), "\", running=", c.running[], ", agents=", length(c.agents), "]")
@@ -296,16 +296,16 @@ removelistener(::Container, listener) = false
 
 """
     containsagent(container::Container, aid::AgentID)
-    containsagent(container::Container, name::String)
+    containsagent(container::Container, name::AbstractString)
 
 Check if an agent is running in the container.
 """
 containsagent(c::Container, aid::AgentID) = name(aid) ∈ keys(c.agents)
-containsagent(c::Container, name::String) = name ∈ keys(c.agents)
+containsagent(c::Container, name::AbstractString) = name ∈ keys(c.agents)
 
 """
     canlocateagent(container::Container, aid::AgentID)
-    canlocateagent(container::Container, name::String)
+    canlocateagent(container::Container, name::AbstractString)
 
 Check if an agent is running in the container, or in any of the remote containers.
 """
@@ -322,11 +322,11 @@ end
 
 """
     agent(container::Container, aid::AgentID)
-    agent(container::Container, name::String)
+    agent(container::Container, name::AbstractString)
 
 Get the agent ID of an agent specified by name or its agent ID.
 """
-agent(c::Container, name::String) = name ∈ keys(c.agents) ? c.agents[name] : nothing
+agent(c::Container, name::AbstractString) = name ∈ keys(c.agents) ? c.agents[name] : nothing
 agent(c::Container, aid::AgentID) = agent(c, name(aid))
 
 """
@@ -350,7 +350,7 @@ services(c::Container) = collect(keys(c.services))
 Run an agent in a container. If the name is not specified, a unique name is randomly
 generated.
 """
-function add(c::Container, name::String, a::Agent)
+function add(c::Container, name::AbstractString, a::Agent)
   canlocateagent(c, name) && throw(ArgumentError("Duplicate agent name"))
   a._container = c
   a._aid = AgentID(name)
@@ -366,12 +366,12 @@ add(c::Container, a::Agent) = add(c, string(typeof(a)) * "-" * string(uuid4())[1
 
 """
     kill(container::Container, aid::AgentID)
-    kill(container::Container, name::String)
+    kill(container::Container, name::AbstractString)
     kill(container::Container, agent::Agent)
 
 Stop an agent running in a container.
 """
-function Base.kill(c::Container, aid::String)
+function Base.kill(c::Container, aid::AbstractString)
   containsagent(c, aid) || return false
   a = c.agents[aid]
   if c.running[]
@@ -546,11 +546,11 @@ function unsubscribe(c::SlaveContainer, t::AgentID, a::Agent)
 end
 
 """
-    register(c::Container, aid::AgentID, svc::String)
+    register(c::Container, aid::AgentID, svc::AbstractString)
 
 Register agent `aid` as providing service `svc`.
 """
-function register(c::Container, aid::AgentID, svc::String)
+function register(c::Container, aid::AgentID, svc::AbstractString)
   svc ∈ keys(c.services) || (c.services[svc] = Set{AgentID}())
   push!(c.services[svc], aid)
   true
@@ -567,45 +567,45 @@ function deregister(c::Container, aid::AgentID)
 end
 
 """
-    deregister(c::Container, aid::AgentID, svc::String)
+    deregister(c::Container, aid::AgentID, svc::AbstractString)
 
 Deregister agent `aid` from providing service `svc`.
 """
-function deregister(c::Container, aid::AgentID, svc::String)
+function deregister(c::Container, aid::AgentID, svc::AbstractString)
   svc ∈ keys(c.services) || return false
   delete!(c.services[svc], aid)
   true
 end
 
 """
-    agentforservice(c::Container, svc::String, owner::Agent)
+    agentforservice(c::Container, svc::AbstractString, owner::Agent)
 
 Lookup any agent providing the service `svc`, and return an `AgentID` owned
 by `owner`. Returns `nothing` if no agent providing specified service found.
 """
-function agentforservice(c::StandaloneContainer, svc::String, owner::Agent)
+function agentforservice(c::StandaloneContainer, svc::AbstractString, owner::Agent)
   svc ∈ keys(c.services) || return nothing
   AgentID(name(first(c.services[svc])), false, owner)
 end
 
 """
-    agentsforservice(c::Container, svc::String, owner::Agent)
+    agentsforservice(c::Container, svc::AbstractString, owner::Agent)
 
 Lookup all agents providing the service `svc`, and return list of `AgentID` owned
 by `owner`. Returns an empty list if no agent providing specified service found.
 """
-function agentsforservice(c::StandaloneContainer, svc::String, owner::Agent)
+function agentsforservice(c::StandaloneContainer, svc::AbstractString, owner::Agent)
   svc ∈ keys(c.services) || return AgentID[]
   [AgentID(name(s), false, owner) for s ∈ c.services[svc]]
 end
 
-function agentforservice(c::SlaveContainer, svc::String, owner::Agent)
+function agentforservice(c::SlaveContainer, svc::AbstractString, owner::Agent)
   rq = Dict("action" => "agentForService", "service" => svc)
   rsp = _ask(c, rq)
   haskey(rsp, "agentID") ? AgentID(rsp["agentID"], false, owner) : nothing
 end
 
-function agentsforservice(c::SlaveContainer, svc::String, owner::Agent)
+function agentsforservice(c::SlaveContainer, svc::AbstractString, owner::Agent)
   rq = Dict("action" => "agentsForService", "service" => svc)
   rsp = _ask(c, rq)
   [AgentID(a, false, owner) for a in rsp["agentIDs"]]
@@ -672,7 +672,7 @@ function _subscriptions(c::SlaveContainer)
   collect(string.(ks))
 end
 
-function _agentsforservice(c::Container, svc::String)
+function _agentsforservice(c::Container, svc::AbstractString)
   svc ∈ keys(c.services) || return AgentID[]
   collect(c.services[svc])
 end
@@ -1024,11 +1024,11 @@ Get the name of the agent.
 name(a::Agent) = name(a._aid)
 
 """
-    agent(a::Agent, name::String)
+    agent(a::Agent, name::AbstractString)
 
 Generate an owned `AgentID` for an agent with the given name.
 """
-agent(a::Agent, name::String) = AgentID(name, false, a)
+agent(a::Agent, name::AbstractString) = AgentID(name, false, a)
 
 """
     currenttimemillis(a::Agent)
@@ -1077,35 +1077,35 @@ Unsubscribe agent from specified topic.
 unsubscribe(a::Agent, t::AgentID) = unsubscribe(container(a), t, a)
 
 """
-    register(a::Agent, svc::String)
+    register(a::Agent, svc::AbstractString)
 
 Register agent as providing a specied service.
 """
-register(a::Agent, svc::String) = register(container(a), AgentID(a), svc)
+register(a::Agent, svc::AbstractString) = register(container(a), AgentID(a), svc)
 
 """
-    deregister(a::Agent, svc::String)
+    deregister(a::Agent, svc::AbstractString)
 
 Deregister agent from providing a specied service.
 """
-deregister(a::Agent, svc::String) = deregister(container(a), AgentID(a), svc)
+deregister(a::Agent, svc::AbstractString) = deregister(container(a), AgentID(a), svc)
 
 """
-    agentforservice(a::Agent, svc::String)
+    agentforservice(a::Agent, svc::AbstractString)
 
 Find an agent providing a specified service. Returns an owned `AgentID` for the
 service provider, if one is found, `nothing` otherwise.
 """
-agentforservice(a::Agent, svc::String) = agentforservice(container(a), svc, a)
+agentforservice(a::Agent, svc::AbstractString) = agentforservice(container(a), svc, a)
 
 """
-    agentsforservice(a::Agent, svc::String)
+    agentsforservice(a::Agent, svc::AbstractString)
 
 Get a list of agents providing a specified service. Returns a list of owned
 `AgentID` for the service providers. The list may be empty if no service providers
 are found.
 """
-agentsforservice(a::Agent, svc::String) = agentsforservice(container(a), svc, a)
+agentsforservice(a::Agent, svc::AbstractString) = agentsforservice(container(a), svc, a)
 
 """
     store(a::Agent)

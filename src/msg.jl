@@ -135,7 +135,7 @@ function registermessages(msg=subtypes(Message))
   end
 end
 
-function _messageclass_lookup(classname::String)
+function _messageclass_lookup(classname::AbstractString)
   haskey(_messageclasses, classname) && return _messageclasses[classname]
   GenericMessage{Symbol(classname)}
 end
@@ -263,7 +263,7 @@ Fjage.classname(::Type{GenericMessage{T}}) where T = string(T)
 Fjage.classname(::GenericMessage{T}) where T = string(T)
 
 GenericMessage(args...) = GenericMessage{Symbol("org.arl.fjage.GenericMessage")}(args...)
-GenericMessage(clazz::String, perf::Symbol=Performative.INFORM; kwargs...) = GenericMessage{Symbol(clazz)}(; performative=perf, kwargs...)
+GenericMessage(clazz::AbstractString, perf::Symbol=Performative.INFORM; kwargs...) = GenericMessage{Symbol(clazz)}(; performative=perf, kwargs...)
 
 # adds notation message.field
 

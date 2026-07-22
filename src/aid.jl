@@ -14,8 +14,8 @@ end
 
 Create an AgentID, optionally with an owner.
 """
-AgentID(name::String, owner=nothing) = name[1] == '#' ? AgentID(name[2:end], true, owner) : AgentID(name, false, owner)
-AgentID(name::String, istopic::Bool) = AgentID(name, istopic, nothing)
+AgentID(name::AbstractString, owner=nothing) = name[1] == '#' ? AgentID(name[2:end], true, owner) : AgentID(name, false, owner)
+AgentID(name::AbstractString, istopic::Bool) = AgentID(name, istopic, nothing)
 
 """
     aid = topic([owner,] name[, subtopic])
@@ -23,12 +23,12 @@ AgentID(name::String, istopic::Bool) = AgentID(name, istopic, nothing)
 Creates an AgentID for a named topic, optionally owned by an owner. AgentIDs that are
 associated with gateways/agents can be used directly in `send()` and `request()` calls.
 """
-topic(name::String) = AgentID(name, true)
+topic(name::AbstractString) = AgentID(name, true)
 topic(aid::AgentID) = aid.istopic ? aid : AgentID(aid.name*"__ntf", true)
-topic(aid::AgentID, topic2::String) = AgentID(aid.name*"__"*topic2*"__ntf", true)
-topic(owner, name::String) = AgentID(name, true, owner)
+topic(aid::AgentID, topic2::AbstractString) = AgentID(aid.name*"__"*topic2*"__ntf", true)
+topic(owner, name::AbstractString) = AgentID(name, true, owner)
 topic(owner, aid::AgentID) = aid.istopic ? aid : AgentID(aid.name*"__ntf", true, owner)
-topic(owner, aid::AgentID, topic2::String) = AgentID(aid.name*"__"*topic2*"__ntf", true, owner)
+topic(owner, aid::AgentID, topic2::AbstractString) = AgentID(aid.name*"__"*topic2*"__ntf", true, owner)
 
 name(aid::AgentID) = aid.name
 owner(aid::AgentID) = aid.owner

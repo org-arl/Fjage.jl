@@ -19,7 +19,7 @@ struct Gateway
   host::String
   port::Int
   reconnect::Ref{Bool}
-  function Gateway(name::String, host, port::Int; reconnect=true)
+  function Gateway(name::AbstractString, host, port::Int; reconnect=true)
     startswith(name, "gateway-") || (name = "gateway-" * name)  # spec: gateway agent names are prefixed "gateway-"
     gw = new(
       AgentID(name, false),
@@ -212,7 +212,7 @@ function _run(gw)
 end
 
 AgentID(gw::Gateway) = gw.agentID
-agent(gw::Gateway, name::String) = AgentID(name, false, gw)
+agent(gw::Gateway, name::AbstractString) = AgentID(name, false, gw)
 
 "Find an agent that provides a named service."
 function agentforservice(gw::Gateway, svc::AbstractString, timeout=6000)
