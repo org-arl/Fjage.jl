@@ -905,7 +905,7 @@ just returns a `nothing`.
 ```julia
 using Fjage
 
-const MySpecialReq = MessageClass(@__MODULE__, "MySpecialReq", nothing, Performative.REQUEST)
+@message "org.arl.fjage.demo.MySpecialReq" struct MySpecialReq end
 
 @agent struct MyAgent end
 
@@ -931,7 +931,7 @@ handle specific messages.
 ```julia
 using Fjage
 
-const MySpecialNtf = MessageClass(@__MODULE__, "MySpecialNtf")
+@message "org.arl.fjage.demo.MySpecialNtf" struct MySpecialNtf end
 
 @agent struct MyAgent end
 
@@ -1890,7 +1890,7 @@ However, if an agent provides its own `init()` method, it should use
 ```julia
 using Fjage
 
-const MySpecialNtf = MessageClass(@__MODULE__, "MySpecialNtf")
+@message "org.arl.fjage.demo.MySpecialNtf" struct MySpecialNtf end
 
 @agent struct MyAgent end
 
