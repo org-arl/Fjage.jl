@@ -1,4 +1,4 @@
-export Performative, Message, GenericMessage, @message, classname, clone, ParameterReq, ParameterRsp, set!
+export Performative, Message, GenericMessage, @message, registermessage, classname, clone, ParameterReq, ParameterRsp, set!
 
 # global variables
 const _messageclasses = Dict{String,DataType}()
@@ -121,7 +121,7 @@ end
 Register message classes with Fjage. Usually message classes are automatically registered on
 creation with `@message`. However, when developing packages, if `@message` is used at the module level,
 the types may be precompiled and the code to register the classes may not get executed at runtime.
-In such cases, you may need to explicitly call `registermessages()` in the `__init()__` function
+In such cases, you may need to explicitly call `registermessages()` in the `__init__()` function
 for the module.
 """
 function registermessages(msg=subtypes(Message))
@@ -133,6 +133,56 @@ function registermessages(msg=subtypes(Message))
     end
     registermessages(subtypes(T))
   end
+end
+
+"""
+    registermessage(classname, T)
+
+Register message type `T` under the fully qualified `classname`, so that gateways and
+containers serialize instances of `T` with `clazz` set to `classname`, and deserialize
+incoming messages with that `clazz` as instances of `T`. Returns `T`.
+
+Message types defined using `@message` are registered automatically, so this function
+is only needed for message types defined by other means. `T` must be a concrete subtype
+of `Message`, constructible with no arguments (e.g. via `Base.@kwdef`), and must have
+the standard message fields (`messageID`, `performative`, `sender`, `recipient`,
+`inReplyTo` and `sentAt`). The Julia type hierarchy of `T` is used to represent
+the message class hierarchy.
+
+If `classname` is already registered to a different type, a warning is logged and the
+registration is replaced.
+
+# Examples
+
+```julia-repl
+julia> Base.@kwdef mutable struct MyNtf <: Message
+         value::Float64 = 0.0
+         messageID::String = string(Fjage.uuid4())
+         performative::Symbol = Performative.INFORM
+         sender::Union{AgentID,Nothing} = nothing
+         recipient::Union{AgentID,Nothing} = nothing
+         inReplyTo::Union{String,Nothing} = nothing
+         sentAt::Int64 = 0
+       end;
+
+julia> registermessage("org.arl.fjage.demo.MyNtf", MyNtf)
+MyNtf
+
+julia> classname(MyNtf())
+"org.arl.fjage.demo.MyNtf"
+```
+"""
+function registermessage(classname::AbstractString, T::Type{<:Message})
+  isconcretetype(T) || throw(ArgumentError("message type $T must be concrete"))
+  cname = String(classname)
+  old = get(_messageclasses, cname, nothing)
+  old === nothing || old === T || @warn "Message class $cname already registered as $old, replacing with $T"
+  @eval begin
+    Fjage.classname(::Type{$T}) = $cname
+    Fjage.classname(::$T) = $cname
+  end
+  _messageclasses[cname] = T
+  T
 end
 
 function _messageclass_lookup(classname::AbstractString)

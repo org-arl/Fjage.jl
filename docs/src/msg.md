@@ -77,6 +77,32 @@ julia> SomeRsp(performative=Performative.INFORM).performative
 :INFORM
 ```
 
+Message types defined with `@message` are automatically registered with Fjage, so
+that gateways and containers can serialize and deserialize them using the correct
+type. A message type defined by other means (e.g. with `Base.@kwdef`) can be
+registered explicitly using `registermessage`, provided it has the standard
+message fields and can be constructed with no arguments:
+```julia
+julia> Base.@kwdef mutable struct MyNtf <: Message
+         value::Float64 = 0.0
+         messageID::String = string(Fjage.uuid4())
+         performative::Symbol = Performative.INFORM
+         sender::Union{AgentID,Nothing} = nothing
+         recipient::Union{AgentID,Nothing} = nothing
+         inReplyTo::Union{String,Nothing} = nothing
+         sentAt::Int64 = 0
+       end;
+
+julia> registermessage("org.arl.fjage.demo.MyNtf", MyNtf)
+MyNtf
+
+julia> classname(MyNtf())
+"org.arl.fjage.demo.MyNtf"
+```
+
+Incoming messages whose class is not registered are deserialized as a
+`GenericMessage` that retains the original class name.
+
 When strict typing is not required, one can use the dictionary-like
 `GenericMessage` message type:
 ```julia
