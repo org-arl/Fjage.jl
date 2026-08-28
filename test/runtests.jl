@@ -422,6 +422,73 @@ include("container_tests.jl")
 
 end
 
+Base.@kwdef mutable struct RegisteredNtf <: Message
+  value::Float64 = 0.0
+  messageID::String = string(Fjage.uuid4())
+  performative::Symbol = Performative.INFORM
+  sender::Union{AgentID,Nothing} = nothing
+  recipient::Union{AgentID,Nothing} = nothing
+  inReplyTo::Union{String,Nothing} = nothing
+  sentAt::Int64 = 0
+end
+
+Base.@kwdef mutable struct RegisteredNtf2 <: Message
+  messageID::String = string(Fjage.uuid4())
+  performative::Symbol = Performative.INFORM
+  sender::Union{AgentID,Nothing} = nothing
+  recipient::Union{AgentID,Nothing} = nothing
+  inReplyTo::Union{String,Nothing} = nothing
+  sentAt::Int64 = 0
+end
+
+@testset "registermessage" begin
+
+  @test_throws ArgumentError registermessage("org.arl.fjage.test.AbstractNtf", Message)
+
+  T = registermessage("org.arl.fjage.test.RegisteredNtf", RegisteredNtf)
+  @test T === RegisteredNtf
+  @test classname(RegisteredNtf) == "org.arl.fjage.test.RegisteredNtf"
+  @test classname(RegisteredNtf()) == "org.arl.fjage.test.RegisteredNtf"
+  @test Fjage._messageclass_lookup("org.arl.fjage.test.RegisteredNtf") === RegisteredNtf
+
+  # serialization uses the registered class name
+  clazz, data = Fjage._prepare(RegisteredNtf(value=2.5))
+  @test clazz == "org.arl.fjage.test.RegisteredNtf"
+  @test data[:value] == 2.5
+
+  # deserialization creates an instance of the registered type
+  msg = Fjage._inflate(Fjage.JSON.parse("""
+    {
+      "clazz": "org.arl.fjage.test.RegisteredNtf",
+      "data": { "value": 3.5, "msgID": "abc", "perf": "INFORM", "sender": "A", "recipient": "B" }
+    }"""))
+  @test msg isa RegisteredNtf
+  @test msg.value == 3.5
+  @test msg.messageID == "abc"
+  @test msg.sender == AgentID("A")
+
+  # unregistered classes fall back to a GenericMessage retaining the class name
+  msg = Fjage._inflate(Fjage.JSON.parse("""
+    {
+      "clazz": "org.arl.fjage.test.UnregisteredNtf",
+      "data": { "value": 3.5, "msgID": "abc", "perf": "INFORM" }
+    }"""))
+  @test msg isa GenericMessage
+  @test classname(msg) == "org.arl.fjage.test.UnregisteredNtf"
+  @test msg.value == 3.5
+
+  # registermessages() rebuilds the registry, including explicitly registered types
+  delete!(Fjage._messageclasses, "org.arl.fjage.test.RegisteredNtf")
+  Fjage.registermessages()
+  @test Fjage._messageclass_lookup("org.arl.fjage.test.RegisteredNtf") === RegisteredNtf
+
+  # re-registering under the same name with a different type warns and replaces
+  @test_logs (:warn, r"already registered") registermessage("org.arl.fjage.test.RegisteredNtf", RegisteredNtf2)
+  @test Fjage._messageclass_lookup("org.arl.fjage.test.RegisteredNtf") === RegisteredNtf2
+  @test_logs (:warn, r"already registered") registermessage("org.arl.fjage.test.RegisteredNtf", RegisteredNtf)
+
+end
+
 @testset "clone(::Message)" begin
 
   original = GenericMessage()
