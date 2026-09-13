@@ -105,7 +105,7 @@ function reset(b::FSMBehavior)
     stop(waker)
   end
   empty!(b.wakers)
-  b.agent === nothing || delete!(b.agent._behaviors, b)
+  b.agent === nothing || _remove_behavior!(b.agent, b)
   t = b.timer
   t === nothing || close(t)
   _release_block(b)
@@ -225,6 +225,6 @@ function action(b::FSMBehavior)
   catch ex
     reconnect(container(b.agent), ex) || logerror(b.agent)
   end
-  delete!(b.agent._behaviors, b)
+  _remove_behavior!(b.agent, b)
   b.agent = nothing
 end
