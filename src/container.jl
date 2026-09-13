@@ -356,7 +356,10 @@ function add(c::Container, name::AbstractString, a::Agent)
   a._aid = AgentID(name)
   c.agents[name] = a
   c isa SlaveContainer && isrunning(c) && _update_watch(c)
-  c.running[] && init(a)
+  if c.running[]
+    c.initing[] || _mark_started(a)
+    init(a)
+  end
   @async _msgloop(a)
   @debug "Added agent $(name)::$(typeof(a))"
   a._aid
@@ -375,13 +378,13 @@ function Base.kill(c::Container, aid::AbstractString)
   containsagent(c, aid) || return false
   a = c.agents[aid]
   if c.running[]
-    foreach(stop, a._behaviors)
+    foreach(stop, _behaviors_snapshot(a))
     lock(() -> notify(a._processmsg, false), a._processmsg)
     shutdown(a)
   end
   a._container = nothing
   a._aid = nothing
-  empty!(a._behaviors)
+  _clear_behaviors!(a)
   foreach(kv -> delete!(kv[2], a), c.topics)
   foreach(kv -> delete!(kv[2], AgentID(aid)), c.services)
   delete!(c.agents, aid)
@@ -410,11 +413,7 @@ function start(c::StandaloneContainer)
   foreach(kv -> init(kv[2]), c.agents)
   @debug "StandaloneContainer is running"
   c.initing[] = false
-  foreach(c.agents) do kv
-    foreach(kv[2]._behaviors) do b
-      @async action(b)
-    end
-  end
+  foreach(kv -> _start_behaviors(kv[2]), c.agents)
   c
 end
 
@@ -442,11 +441,7 @@ end
 function _alive(c::SlaveContainer)
   c.initing[] || return
   c.initing[] = false
-  foreach(c.agents) do kv
-    foreach(kv[2]._behaviors) do b
-      @async action(b)
-    end
-  end
+  foreach(kv -> _start_behaviors(kv[2]), c.agents)
 end
 
 """
@@ -802,6 +797,8 @@ macro agent(sdef)
     push!(fields, :(_msgqueue::Vector{Fjage.Message} = Fjage.Message[]))
     push!(fields, :(_processmsg::Threads.Condition = Threads.Condition()))
     push!(fields, :(_lock::ReentrantLock = ReentrantLock()))
+    push!(fields, :(_behaviors_lock::ReentrantLock = ReentrantLock()))
+    push!(fields, :(_started::Bool = false))
     :( Base.@kwdef mutable struct $T <: $P; $(fields...); end ) |> esc
   elseif @capture(sdef, struct T_ fields__ end)
     push!(fields, :(_aid::Union{Fjage.AgentID,Nothing} = nothing))
@@ -811,6 +808,8 @@ macro agent(sdef)
     push!(fields, :(_msgqueue::Vector{Fjage.Message} = Fjage.Message[]))
     push!(fields, :(_processmsg::Threads.Condition = Threads.Condition()))
     push!(fields, :(_lock::ReentrantLock = ReentrantLock()))
+    push!(fields, :(_behaviors_lock::ReentrantLock = ReentrantLock()))
+    push!(fields, :(_started::Bool = false))
     :( Base.@kwdef mutable struct $T <: Fjage.Agent; $(fields...); end ) |> esc
   else
     @error "Bad agent definition"
@@ -1339,6 +1338,34 @@ end
 
 Base.show(io::IO, b::Behavior) = print(io, typeof(b), "/", name(b.agent))
 
+function _add_behavior!(a::Agent, b::Behavior)
+  lock(a._behaviors_lock) do
+    push!(a._behaviors, b)
+    a._started
+  end
+end
+
+_remove_behavior!(a::Agent, b::Behavior) = lock(() -> delete!(a._behaviors, b), a._behaviors_lock)
+
+_behaviors_snapshot(a::Agent) = lock(() -> collect(a._behaviors), a._behaviors_lock)
+
+function _clear_behaviors!(a::Agent)
+  lock(a._behaviors_lock) do
+    empty!(a._behaviors)
+    a._started = false
+  end
+end
+
+_mark_started(a::Agent) = lock(() -> a._started = true, a._behaviors_lock)
+
+function _start_behaviors(a::Agent)
+  bs = lock(a._behaviors_lock) do
+    a._started = true
+    collect(a._behaviors)
+  end
+  foreach(b -> @async(action(b)), bs)
+end
+
 """
     add(a::Agent, b::Behavior)
 
@@ -1350,8 +1377,7 @@ function add(a::Agent, b::Behavior)
   (c === nothing || !isrunning(c)) && throw(ArgumentError("Agent not running"))
   b.agent = a
   @debug "Add $(typeof(b)) to agent $(a._aid)"
-  push!(a._behaviors, b)
-  c.initing[] || @async action(b)
+  _add_behavior!(a, b) && @async action(b)
   b
 end
 
@@ -1466,7 +1492,7 @@ Resets a behavior, removing it from an agent running it. Once a behavior is
 reset, it may be reused later by adding it to an agent.
 """
 function reset(b::Behavior)
-  b.agent === nothing || delete!(b.agent._behaviors, b)
+  b.agent === nothing || _remove_behavior!(b.agent, b)
   t = b.timer
   t === nothing || close(t)
   _release_block(b)
@@ -1550,7 +1576,7 @@ function action(b::OneShotBehavior)
     reconnect(container(b.agent), ex) || logerror(b.agent)
   end
   b.done = true
-  delete!(b.agent._behaviors, b)
+  _remove_behavior!(b.agent, b)
   b.agent = nothing
 end
 
@@ -1612,7 +1638,7 @@ function action(b::CyclicBehavior)
     reconnect(container(b.agent), ex) || logerror(b.agent)
   end
   b.done = true
-  delete!(b.agent._behaviors, b)
+  _remove_behavior!(b.agent, b)
   b.agent = nothing
 end
 
@@ -1701,7 +1727,7 @@ function action(b::WakerBehavior)
     reconnect(container(b.agent), ex) || logerror(b.agent)
   end
   b.done = true
-  delete!(b.agent._behaviors, b)
+  _remove_behavior!(b.agent, b)
   b.agent = nothing
 end
 
@@ -1778,7 +1804,7 @@ function action(b::TickerBehavior)
     reconnect(container(b.agent), ex) || logerror(b.agent)
   end
   b.done = true
-  delete!(b.agent._behaviors, b)
+  _remove_behavior!(b.agent, b)
   b.agent = nothing
 end
 
@@ -1845,7 +1871,7 @@ function action(b::PoissonBehavior)
     reconnect(container(b.agent), ex) || logerror(b.agent)
   end
   b.done = true
-  delete!(b.agent._behaviors, b)
+  _remove_behavior!(b.agent, b)
   b.agent = nothing
 end
 
@@ -1928,7 +1954,7 @@ function action(b::MessageBehavior)
     _stop_listening(b.agent, ch)
   end
   b.done = true
-  delete!(b.agent._behaviors, b)
+  _remove_behavior!(b.agent, b)
   b.agent = nothing
 end
 

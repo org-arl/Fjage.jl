@@ -69,7 +69,7 @@ function action(b::CoroutineBehavior)
     b.done = true
     b.control_task = nothing
     b.action_task = nothing
-    delete!(b.agent._behaviors, b)
+    _remove_behavior!(b.agent, b)
     b.agent = nothing
 end
 

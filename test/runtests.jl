@@ -435,3 +435,26 @@ end
   @test cloned.data !== original.data
 
 end
+
+@testset "add(::Agent, ::Behavior) from multiple threads" begin
+
+  @agent struct ThreadedAddAgent end
+  c = Container()
+  a = ThreadedAddAgent()
+  add(c, "a", a)
+  start(c)
+  sleep(0.5)
+  before = Set(Fjage._behaviors_snapshot(a))
+  n = 5000
+  count = Threads.Atomic{Int}(0)
+  @sync for _ in 1:4*Threads.nthreads()
+    Threads.@spawn for _ in 1:n
+      add(a, OneShotBehavior((a, b) -> Threads.atomic_add!(count, 1)))
+    end
+  end
+  sleep(2)
+  @test count[] == 4 * Threads.nthreads() * n
+  @test Set(Fjage._behaviors_snapshot(a)) == before
+  shutdown(c)
+
+end
