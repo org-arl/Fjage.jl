@@ -144,7 +144,8 @@ function _run(gw)
       _println(gw.sock[], "{\"alive\": true}")
       _println(gw.sock[], "{\"action\": \"auth\", \"name\": \"$(name(gw))\"}")
       _update_watch(gw)
-      while isopen(gw.sock[])
+      # readline returns "" forever once the peer has closed, so stop at end of stream
+      while isopen(gw.sock[]) && !eof(gw.sock[])
         s = strip(readline(gw.sock[]))
         @debug "<< $s"
         json = try
@@ -192,6 +193,7 @@ function _run(gw)
           _alive(gw)
         end
       end
+      close(gw.sock[])    # the peer closed the connection; closing lets the reconnect loop run
     catch ex
       if !(ex isa ErrorException && startswith(ex.msg, "Unexpected end of input"))
         showerror(stderr, ex, catch_backtrace())

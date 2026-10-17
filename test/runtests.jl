@@ -1,6 +1,7 @@
 using Test
 using Fjage
 using Base64
+import Sockets
 
 # start fjåge
 
@@ -524,4 +525,46 @@ end
   @test Set(Fjage._behaviors_snapshot(a)) == before
   shutdown(c)
 
+end
+
+@testset "Gateway stops when the server closes the connection" begin
+  server = Sockets.listen(Sockets.IPv4(127, 0, 0, 1), 0)
+  port = Int(Sockets.getsockname(server)[2])
+  @async begin
+    sock = Sockets.accept(server)
+    last = Ref(time())
+    @async while isopen(sock) && !eof(sock)
+      readline(sock)  # read everything, so that closing ends the connection cleanly
+      last[] = time()
+    end
+    while time() - last[] < 1.0   # close once the gateway has gone idle
+      sleep(0.1)
+    end
+    close(sock)
+  end
+  # on its own thread, so a gateway that spins instead of stopping fails the test rather than hanging it
+  gw = fetch(Threads.@spawn Gateway("127.0.0.1", port; reconnect=false))
+  @test timedwait(() -> !isopen(gw.sock[]), 5.0) === :ok
+  close(server)
+end
+
+@testset "Gateway reconnects after the server closes the connection" begin
+  server = Sockets.listen(Sockets.IPv4(127, 0, 0, 1), 0)
+  port = Int(Sockets.getsockname(server)[2])
+  accepted = Threads.Atomic{Int}(0)
+  @async while isopen(server)
+    sock = try Sockets.accept(server) catch; break end
+    Threads.atomic_add!(accepted, 1)
+    @async while isopen(sock) && !eof(sock)
+      readline(sock)
+    end
+    if accepted[] == 1
+      sleep(1.0)
+      close(sock)
+    end
+  end
+  gw = fetch(Threads.@spawn Gateway("127.0.0.1", port))
+  @test timedwait(() -> accepted[] >= 2, 10.0) === :ok
+  close(gw)
+  close(server)
 end
